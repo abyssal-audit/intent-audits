@@ -52,11 +52,11 @@ Remove that `other` line and the same message returns `sporing` — the closest 
 
 no-acv3 keeps the never-refuse design of acv3: there is no `none_of_the_above`, so it always picks the best match from the list. The label side was trained explicitly — half the catalog examples keep their real Norwegian names, and a share of the translated examples are renamed to Norwegian compounds — so long names like `konto_gjenoppretting` are copied character-for-character.
 
-**Accuracy:** — held-out benchmarks first. Neither set was used in training, and both use intents the model has never seen: MASSIVE is real human-written Norwegian across 60 assistant intents; the translated set is 1,166 messages over unseen customer-service intents. In-scope accuracy is **92.2%** on unseen Norwegian.
+**Accuracy:** — held-out benchmarks first. No message in either set was used in training. MASSIVE is real human-written Norwegian (validation split) across 60 assistant intents that the model did see in training; the translated set is 600 messages over customer-service intents the model has never seen. In-scope accuracy is **92.2%** on unseen native Norwegian.
 
-| Benchmark (unseen intents and messages) | stock qwen2.5:1.5b | English acv3 | this model |
+| Benchmark (held-out messages) | stock qwen2.5:1.5b | English acv3 | this model |
 | --- | --- | --- | --- |
-| MASSIVE nb-NO (n=615) | 64.2% | 83.9% | **92.2%** |
+| MASSIVE nb-NO, seen intents (n=615) | 64.2% | 83.9% | **92.2%** |
 | Translated acv3, unseen intents (n=600) | 65.5% | 89.8% | **91.5%** |
 | Fresh hand-written messages, near-synonym offered (n=57) | — | — | 94.7% |
 
@@ -75,7 +75,7 @@ no-acv3 keeps the never-refuse design of acv3: there is no `none_of_the_above`, 
 
 | Metric | no-acv3 | English acv3 | stock qwen2.5:1.5b |
 | --- | --- | --- | --- |
-| Unseen Norwegian, in-scope (MASSIVE) | **92.2%** | 83.9% | 64.2% |
+| Native Norwegian, held-out messages (MASSIVE) | **92.2%** | 83.9% | 64.2% |
 | Unseen intents, in-scope (translated acv3) | **91.5%** | 89.8% | 65.5% |
 | Catalog audit, in-scope (in-distribution) | **99.5%** | 94.3% | 84.2% |
 | Catalog audit, near-synonym trap (free) | **99.5%** | 95.4% | 85.6% |
