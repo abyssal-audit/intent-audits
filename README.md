@@ -56,9 +56,3 @@ correct behaviour on `native_out` is escaping the list). Omitted → auto-detect
 
 Missing fields are inferred from folder and file names.
 
-## Local preview
-
-```
-python scripts/build_manifest.py
-python -m http.server 8080   # open http://localhost:8080/
-```
