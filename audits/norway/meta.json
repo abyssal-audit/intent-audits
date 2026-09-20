@@ -29,12 +29,18 @@
       "model": "Abyssal/intent-classifier-general-no-acv3:1.5b",
       "baseline": false,
       "tag": "5850 · v3b"
+    },
+    "results_10k_en-acv3_reference.csv": {
+      "label": "English acv3 on the Norwegian audit",
+      "model": "Abyssal/intent-classifier-general-acv3:1.5b",
+      "tag": "EN acv3"
     }
   },
   "docs": {
     "MODEL_CARD_no-acv3.md": "Model card · no-acv3",
     "AUDIT_REPORT_10K_no-acv3_v3b.md": "Audit report · no-acv3 v3b (10k)",
-    "AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md": "Audit report · stock qwen2.5:1.5b (10k)"
+    "AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md": "Audit report · stock qwen2.5:1.5b (10k)",
+    "AUDIT_REPORT_10K_en-acv3_reference.md": "Audit report · English acv3 (10k)"
   },
   "scoring": "accept_bias",
   "stats": {

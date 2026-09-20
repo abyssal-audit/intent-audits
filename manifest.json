@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-20T09:54:33Z",
+  "generated": "2026-09-20T10:13:38Z",
   "countries": [
     {
       "scoring": "accept_bias",
@@ -22,6 +22,39 @@
         "in_list": 100
       },
       "runs": [
+        {
+          "file": "audits/norway/results_10k_en-acv3_reference.csv",
+          "name": "results_10k_en-acv3_reference.csv",
+          "rows": 10008,
+          "bytes": 7334016,
+          "columns": [
+            "case_id",
+            "variant",
+            "mode",
+            "draw",
+            "message",
+            "gold",
+            "candidates",
+            "expected",
+            "prompt",
+            "output_raw",
+            "output_norm",
+            "matched",
+            "in_list",
+            "correct",
+            "latency_ms",
+            "tokens"
+          ],
+          "stats": {
+            "cases": 952,
+            "intents": 128,
+            "calls": 10008
+          },
+          "label": "English acv3 on the Norwegian audit",
+          "baseline": false,
+          "model": "Abyssal/intent-classifier-general-acv3:1.5b",
+          "tag": "EN acv3"
+        },
         {
           "file": "audits/norway/results_10k_no-acv3_v3b.csv",
           "name": "results_10k_no-acv3_v3b.csv",
@@ -125,6 +158,12 @@
       ],
       "docs": [
         {
+          "file": "audits/norway/AUDIT_REPORT_10K_en-acv3_reference.md",
+          "name": "AUDIT_REPORT_10K_en-acv3_reference.md",
+          "bytes": 30770,
+          "title": "Audit report · English acv3 (10k)"
+        },
+        {
           "file": "audits/norway/AUDIT_REPORT_10K_no-acv3_v3b.md",
           "name": "AUDIT_REPORT_10K_no-acv3_v3b.md",
           "bytes": 29009,
@@ -139,7 +178,7 @@
         {
           "file": "audits/norway/MODEL_CARD_no-acv3.md",
           "name": "MODEL_CARD_no-acv3.md",
-          "bytes": 7112,
+          "bytes": 7567,
           "title": "Model card · no-acv3"
         }
       ]
