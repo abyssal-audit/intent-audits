@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-20T01:04:48Z",
+  "generated": "2026-09-20T09:54:33Z",
   "countries": [
     {
       "scoring": "accept_bias",
@@ -13,7 +13,7 @@
       "name": "Norway",
       "language": "Norwegian (bokmål · nynorsk · dialect)",
       "flag": "🇳🇴",
-      "description": "128 intents / 16 domains. 940 messages (674 catalog seeds + 266 audit-only register variants), temperature 0, free generation and enum-constrained decoding.",
+      "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution: the catalog's intents and seed phrasings are in the model's training set — see the model card for held-out numbers (MASSIVE nb-NO 92.2%, unseen intents 91.5%).",
       "gates": {
         "inscope": 94,
         "nearsyn_free": 94,
@@ -139,7 +139,7 @@
         {
           "file": "audits/norway/MODEL_CARD_no-acv3.md",
           "name": "MODEL_CARD_no-acv3.md",
-          "bytes": 7582,
+          "bytes": 7112,
           "title": "Model card · no-acv3"
         }
       ]

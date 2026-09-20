@@ -6,7 +6,7 @@ The Norwegian model in the family: routes bokmål, nynorsk and dialect to the si
 
 Two modes, depending on whether you need out-of-scope detection.
 
-**1. Routing (the normal case).** No catch-all, no `enum` — the model always answers with one of your intents. Across all 10,008 audit calls it never once produced a label outside the candidate list:
+**1. Routing (the normal case).** No catch-all, no `enum` — the model always answers with one of your intents. Across all 10,008 audit calls and every held-out set it never once produced a label outside the candidate list:
 
 ```
 curl http://localhost:11434/api/chat -d '{
@@ -52,7 +52,17 @@ Remove that `other` line and the same message returns `sporing` — the closest 
 
 no-acv3 keeps the never-refuse design of acv3: there is no `none_of_the_above`, so it always picks the best match from the list. The label side was trained explicitly — half the catalog examples keep their real Norwegian names, and a share of the translated examples are renamed to Norwegian compounds — so long names like `konto_gjenoppretting` are copied character-for-character.
 
-**Accuracy:** — 10,008 calls, temperature 0, a 128-intent / 16-domain Norwegian taxonomy (940 messages, bokmål + nynorsk + dialect). In-scope accuracy is **99.5%**.
+**Accuracy:** — held-out benchmarks first. Neither set was used in training, and both use intents the model has never seen: MASSIVE is real human-written Norwegian across 60 assistant intents; the translated set is 1,166 messages over unseen customer-service intents. In-scope accuracy is **92.2%** on unseen Norwegian.
+
+| Benchmark (unseen intents and messages) | stock qwen2.5:1.5b | this model |
+| --- | --- | --- |
+| MASSIVE nb-NO (n=615) | 64.2% | **92.2%** |
+| Translated acv3, unseen intents (n=600) | 65.5% | **91.5%** |
+| Fresh hand-written messages, near-synonym offered (n=57) | — | 94.7% |
+
+**In-list obedience is 100.0% on every set** — it never produced a token outside the offered list, including the 926 audit calls where the gold intent was deliberately left out.
+
+**Catalog audit (in-distribution):** 10,008 calls, temperature 0, the 128-intent / 16-domain Norwegian taxonomy the model was tuned for (940 messages, bokmål + nynorsk + dialect). The catalog's intents and seed phrasings are part of the training set, so this measures how well the model serves *that* taxonomy — not generalisation. In-scope accuracy is 99.5%.
 
 | Usage | Free-gen acc | In-list | Enum-constrained acc | In-list |
 | --- | --- | --- | --- | --- |
@@ -61,34 +71,22 @@ no-acv3 keeps the never-refuse design of acv3: there is no `none_of_the_above`, 
 | Invented / custom names | 99.5% | 100% | 99.4% | 100% |
 | Exact-phrase probes | 100% | 100% | 100% | 100% |
 
-**In-list obedience is 100.0% across all 10,008 calls** — including the 926 where the gold intent was deliberately left out. It never produced a token outside the offered list.
-
-**Held-out:** 595 of the 940 audit messages never appear in the training data (verified), so nothing scored here was trained on — anyone can reproduce it.
-
-| Benchmark (unseen messages, n=6,264 calls) | stock qwen2.5:1.5b | this model |
-| --- | --- | --- |
-| In-scope accuracy | 83.8% | 99.4% |
-| Near-synonym trap (free) | 85.4% | 99.3% |
-| Invented / custom names (free) | 78.0% | 99.5% |
-
-The remaining misses are genuine ambiguities in the corpus (“Kan jeg sjekke inn tidlig?” — hotel or flight).
-
 ## no-acv3 vs stock qwen
 
 | Metric | no-acv3 | stock qwen2.5:1.5b |
 | --- | --- | --- |
-| In-scope accuracy | **99.5%** | 84.2% |
-| Free-gen accuracy (in-scope) | **99.5%** | 88.8% |
-| Near-synonym trap (free) | **99.5%** | 85.6% |
-| Invented / custom names (free) | **99.5%** | 77.1% |
-| In-list obedience | **100.0%** | 99.1% |
-| Exact probes (free) | **100%** | 97.2% |
+| Unseen Norwegian, in-scope (MASSIVE) | **92.2%** | 64.2% |
+| Unseen intents, in-scope (translated acv3) | **91.5%** | 65.5% |
+| Catalog audit, in-scope (in-distribution) | **99.5%** | 84.2% |
+| Catalog audit, near-synonym trap (free) | **99.5%** | 85.6% |
+| Catalog audit, invented / custom names (free) | **99.5%** | 77.1% |
+| In-list obedience | **100.0%** | 98.0–99.1% |
 | Rejection rate (out-of-scope) | opt-in | 2.7% (accidental) |
 | Avg latency | ~0.51 s | ~0.36 s |
 
-no-acv3 leads every accuracy row — most dramatically on invented names (+22.4), the skill the recipe trains, and on the near-synonym trap (+13.9). Stock qwen keeps only speed, because it emits shorter, unconstrained output.
+no-acv3 leads every accuracy row, by +26 to +28 points on the unseen sets — the skill the recipe trains. Stock qwen keeps only speed, because it emits shorter, unconstrained output. The remaining misses are genuine ambiguities (“lommeboka er borte, sperr alt” — lost card or fraud report).
 
-**Every number here is reproducible.** Both models are scored on the same audit — 10,008 calls each, 128 intents across 16 domains, same prompts and descriptions. Raw per-call results, computed metrics and a row-level diff: [audit dashboard](https://abyssal-audit.github.io/intent-audits/#norway)
+**Every number here is reproducible.** Both models are scored on the same catalog audit — 10,008 calls each, 128 intents across 16 domains, same prompts and descriptions. Raw per-call results, computed metrics and a row-level diff: [audit dashboard](https://abyssal-audit.github.io/intent-audits/#norway)
 
 **Good for:** routing Norwegian support tickets, chatbot intent detection, message tagging, triage — fast, local, fully customizable intents, for any workload where every message must land in exactly one bucket.
 

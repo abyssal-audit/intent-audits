@@ -2,7 +2,7 @@
   "name": "Norway",
   "language": "Norwegian (bokmål · nynorsk · dialect)",
   "flag": "🇳🇴",
-  "description": "128 intents / 16 domains. 940 messages (674 catalog seeds + 266 audit-only register variants), temperature 0, free generation and enum-constrained decoding.",
+  "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution: the catalog's intents and seed phrasings are in the model's training set — see the model card for held-out numbers (MASSIVE nb-NO 92.2%, unseen intents 91.5%).",
   "gates": {
     "inscope": 94,
     "nearsyn_free": 94,
