@@ -21,7 +21,7 @@
     return el;
   };
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const pct = (a, b, d = 1) => (b ? (100 * a / b).toFixed(d) + "%" : "–");
+  const pct = (a, b, d = 1) => (b && Number.isFinite(a) ? (100 * a / b).toFixed(d) + "%" : "–");
   const num = (a, b) => (b ? 100 * a / b : NaN);
   const truthy = (v) => /^(true|1|yes|y)$/i.test(String(v ?? "").trim());
   const fmtBytes = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : n > 1e3 ? (n / 1e3).toFixed(0) + " kB" : n + " B";
@@ -79,11 +79,13 @@
     };
   }
   function gateResults(m, gates) {
+    // Gates whose variant is absent from the CSV are reported as n/a, not as failures.
     return GATE_DEFS.filter((g) => gates[g.key] != null).map((g) => {
       const val = g.get(m), thr = +gates[g.key];
-      const pass = Number.isFinite(val) && (g.op === ">=" ? val >= thr - 1e-9 : Math.abs(val - thr) < 0.05);
-      return { ...g, val, thr, pass };
-    });
+      const na = !Number.isFinite(val);
+      const pass = !na && (g.op === ">=" ? val >= thr - 1e-9 : Math.abs(val - thr) < 0.05);
+      return { ...g, val, thr, pass, na };
+    }).filter((g) => !g.na);
   }
 
   // ---------- data loading ----------

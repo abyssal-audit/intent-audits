@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-20T00:52:58Z",
+  "generated": "2026-09-20T01:04:33Z",
   "countries": [
     {
       "key": "norway",
@@ -19,7 +19,7 @@
           "file": "audits/norway/results_10k_no-acv3_v3b.csv",
           "name": "results_10k_no-acv3_v3b.csv",
           "rows": 10008,
-          "bytes": 7323685,
+          "bytes": 7333694,
           "columns": [
             "case_id",
             "variant",
@@ -47,7 +47,7 @@
           "file": "audits/norway/results_10k_qwen2.5-1.5b_baseline.csv",
           "name": "results_10k_qwen2.5-1.5b_baseline.csv",
           "rows": 10008,
-          "bytes": 7327115,
+          "bytes": 7337124,
           "columns": [
             "case_id",
             "variant",
@@ -74,7 +74,7 @@
           "file": "audits/norway/results_5850_no-acv3_v3b.csv",
           "name": "results_5850_no-acv3_v3b.csv",
           "rows": 5850,
-          "bytes": 4272384,
+          "bytes": 4278235,
           "columns": [
             "case_id",
             "variant",
@@ -102,13 +102,13 @@
         {
           "file": "audits/norway/AUDIT_REPORT_10K_no-acv3_v3b.md",
           "name": "AUDIT_REPORT_10K_no-acv3_v3b.md",
-          "bytes": 28517,
+          "bytes": 29009,
           "title": "Audit report · no-acv3 v3b (10k)"
         },
         {
           "file": "audits/norway/AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md",
           "name": "AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md",
-          "bytes": 31105,
+          "bytes": 31651,
           "title": "Audit report · stock qwen2.5:1.5b (10k)"
         },
         {
