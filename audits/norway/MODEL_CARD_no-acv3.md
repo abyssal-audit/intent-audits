@@ -88,7 +88,7 @@ The remaining misses are genuine ambiguities in the corpus (“Kan jeg sjekke in
 
 no-acv3 leads every accuracy row — most dramatically on invented names (+22.4), the skill the recipe trains, and on the near-synonym trap (+13.9). Stock qwen keeps only speed, because it emits shorter, unconstrained output.
 
-**Every number here is reproducible.** Both models are scored on the same audit — 10,008 calls each, 128 intents across 16 domains, same prompts and descriptions. Raw per-call results, computed metrics and a row-level diff: audit dashboard [https://abyssal-audit.github.io/intent-audits/#norway]
+**Every number here is reproducible.** Both models are scored on the same audit — 10,008 calls each, 128 intents across 16 domains, same prompts and descriptions. Raw per-call results, computed metrics and a row-level diff: [audit dashboard](https://abyssal-audit.github.io/intent-audits/#norway)
 
 **Good for:** routing Norwegian support tickets, chatbot intent detection, message tagging, triage — fast, local, fully customizable intents, for any workload where every message must land in exactly one bucket.
 
