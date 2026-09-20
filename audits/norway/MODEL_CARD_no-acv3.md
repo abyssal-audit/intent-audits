@@ -78,7 +78,7 @@ The fine-tune wins everywhere — most dramatically on invented names (+22.4), t
 
 > **Note on comparing with the English family.** These numbers come from the **Norwegian 10,008-call / 128-intent / 16-domain** audit (bokmål + nynorsk + dialect). The English siblings are scored on the **6,076-call / 243-intent / 22-domain** corpus, and the two are not comparable — different language, different taxonomy, tighter adversarial probes here. Use the table above when ranking no-acv3 against stock qwen.
 >
-> **Every number here is reproducible.** Same 10,008 calls against both models. Raw per-call results and scoring code: `no/scripts/run_audit_no.py --profile-10k` (`no/output/results_no_10k_v3b.csv`, `AUDIT_REPORT_NO_10K_V3B.md`; baseline `no/output/results_no_10k_base_v2desc.csv`, `AUDIT_REPORT_NO_10K_BASE_V2DESC.md`).
+> **Every number here is reproducible.** Same 10,008 calls against both models. Browse the full per-call data, computed results, and a row-level diff against stock qwen on the audit dashboard: **https://abyssal-audit.github.io/intent-audits/#norway** (raw CSVs downloadable from the *Raw Data* tab; source in [abyssal-audit/intent-audits](https://github.com/abyssal-audit/intent-audits)). Reproduce locally with `no/scripts/run_audit_no.py --profile-10k`.
 
 **Good for:** routing Norwegian support tickets, chatbot intent detection, message tagging, triage — fast, local, fully customizable intents, for any workload where every message must land in exactly one bucket.
 
