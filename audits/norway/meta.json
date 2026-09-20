@@ -1,0 +1,17 @@
+{
+  "name": "Norway",
+  "language": "Norwegian (bokmål · nynorsk · dialect)",
+  "flag": "🇳🇴",
+  "description": "128 intents / 16 domains. 940 messages (674 catalog seeds + 266 audit-only register variants), temperature 0, free generation and enum-constrained decoding.",
+  "gates": {"inscope": 94, "nearsyn_free": 94, "custom_free": 88, "exact_free": 100, "in_list": 100},
+  "runs": {
+    "results_10k_no-acv3_v3b.csv": {"label": "no-acv3 v3b · 10k profile", "model": "Abyssal/intent-classifier-general-no-acv3:1.5b", "baseline": false, "primary": true},
+    "results_10k_qwen2.5-1.5b_baseline.csv": {"label": "stock qwen2.5:1.5b · 10k profile", "model": "qwen2.5:1.5b", "baseline": true},
+    "results_5850_no-acv3_v3b.csv": {"label": "no-acv3 v3b · 5850 seed profile", "model": "Abyssal/intent-classifier-general-no-acv3:1.5b", "baseline": false}
+  },
+  "docs": {
+    "MODEL_CARD_no-acv3.md": "Model card · no-acv3",
+    "AUDIT_REPORT_10K_no-acv3_v3b.md": "Audit report · no-acv3 v3b (10k)",
+    "AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md": "Audit report · stock qwen2.5:1.5b (10k)"
+  }
+}

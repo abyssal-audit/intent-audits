@@ -1,0 +1,123 @@
+{
+  "generated": "2026-09-20T00:47:40Z",
+  "countries": [
+    {
+      "key": "norway",
+      "name": "Norway",
+      "language": "Norwegian (bokmål · nynorsk · dialect)",
+      "flag": "🇳🇴",
+      "description": "128 intents / 16 domains. 940 messages (674 catalog seeds + 266 audit-only register variants), temperature 0, free generation and enum-constrained decoding.",
+      "gates": {
+        "inscope": 94,
+        "nearsyn_free": 94,
+        "custom_free": 88,
+        "exact_free": 100,
+        "in_list": 100
+      },
+      "runs": [
+        {
+          "file": "audits/norway/results_10k_no-acv3_v3b.csv",
+          "name": "results_10k_no-acv3_v3b.csv",
+          "rows": 10008,
+          "bytes": 7333694,
+          "columns": [
+            "case_id",
+            "variant",
+            "mode",
+            "draw",
+            "message",
+            "gold",
+            "candidates",
+            "expected",
+            "prompt",
+            "output_raw",
+            "output_norm",
+            "matched",
+            "in_list",
+            "correct",
+            "latency_ms",
+            "tokens"
+          ],
+          "label": "no-acv3 v3b · 10k profile",
+          "baseline": false,
+          "model": "Abyssal/intent-classifier-general-no-acv3:1.5b",
+          "primary": true
+        },
+        {
+          "file": "audits/norway/results_10k_qwen2.5-1.5b_baseline.csv",
+          "name": "results_10k_qwen2.5-1.5b_baseline.csv",
+          "rows": 10008,
+          "bytes": 7337124,
+          "columns": [
+            "case_id",
+            "variant",
+            "mode",
+            "draw",
+            "message",
+            "gold",
+            "candidates",
+            "expected",
+            "prompt",
+            "output_raw",
+            "output_norm",
+            "matched",
+            "in_list",
+            "correct",
+            "latency_ms",
+            "tokens"
+          ],
+          "label": "stock qwen2.5:1.5b · 10k profile",
+          "baseline": true,
+          "model": "qwen2.5:1.5b"
+        },
+        {
+          "file": "audits/norway/results_5850_no-acv3_v3b.csv",
+          "name": "results_5850_no-acv3_v3b.csv",
+          "rows": 5850,
+          "bytes": 4278235,
+          "columns": [
+            "case_id",
+            "variant",
+            "mode",
+            "draw",
+            "message",
+            "gold",
+            "candidates",
+            "expected",
+            "prompt",
+            "output_raw",
+            "output_norm",
+            "matched",
+            "in_list",
+            "correct",
+            "latency_ms",
+            "tokens"
+          ],
+          "label": "no-acv3 v3b · 5850 seed profile",
+          "baseline": false,
+          "model": "Abyssal/intent-classifier-general-no-acv3:1.5b"
+        }
+      ],
+      "docs": [
+        {
+          "file": "audits/norway/AUDIT_REPORT_10K_no-acv3_v3b.md",
+          "name": "AUDIT_REPORT_10K_no-acv3_v3b.md",
+          "bytes": 29009,
+          "title": "Audit report · no-acv3 v3b (10k)"
+        },
+        {
+          "file": "audits/norway/AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md",
+          "name": "AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md",
+          "bytes": 31651,
+          "title": "Audit report · stock qwen2.5:1.5b (10k)"
+        },
+        {
+          "file": "audits/norway/MODEL_CARD_no-acv3.md",
+          "name": "MODEL_CARD_no-acv3.md",
+          "bytes": 7582,
+          "title": "Model card · no-acv3"
+        }
+      ]
+    }
+  ]
+}
