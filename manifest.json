@@ -1,7 +1,14 @@
 {
-  "generated": "2026-09-20T01:04:33Z",
+  "generated": "2026-09-20T01:04:48Z",
   "countries": [
     {
+      "scoring": "accept_bias",
+      "stats": {
+        "cases": 952,
+        "intents": 128,
+        "calls": 10008,
+        "domains": 16
+      },
       "key": "norway",
       "name": "Norway",
       "language": "Norwegian (bokmål · nynorsk · dialect)",
@@ -38,10 +45,16 @@
             "latency_ms",
             "tokens"
           ],
+          "stats": {
+            "cases": 952,
+            "intents": 128,
+            "calls": 10008
+          },
           "label": "no-acv3 v3b · 10k profile",
           "baseline": false,
           "model": "Abyssal/intent-classifier-general-no-acv3:1.5b",
-          "primary": true
+          "primary": true,
+          "tag": "10k · v3b"
         },
         {
           "file": "audits/norway/results_10k_qwen2.5-1.5b_baseline.csv",
@@ -66,9 +79,15 @@
             "latency_ms",
             "tokens"
           ],
+          "stats": {
+            "cases": 952,
+            "intents": 128,
+            "calls": 10008
+          },
           "label": "stock qwen2.5:1.5b · 10k profile",
           "baseline": true,
-          "model": "qwen2.5:1.5b"
+          "model": "qwen2.5:1.5b",
+          "tag": "Baseline"
         },
         {
           "file": "audits/norway/results_5850_no-acv3_v3b.csv",
@@ -93,9 +112,15 @@
             "latency_ms",
             "tokens"
           ],
+          "stats": {
+            "cases": 686,
+            "intents": 128,
+            "calls": 5850
+          },
           "label": "no-acv3 v3b · 5850 seed profile",
           "baseline": false,
-          "model": "Abyssal/intent-classifier-general-no-acv3:1.5b"
+          "model": "Abyssal/intent-classifier-general-no-acv3:1.5b",
+          "tag": "5850 · v3b"
         }
       ],
       "docs": [

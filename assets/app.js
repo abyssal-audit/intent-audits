@@ -1,368 +1,483 @@
-/* Abyssal intent-classifier audits — static, fully client-side.
- * Reads manifest.json (built by CI from audits/<country>/), then computes
- * every metric from the raw per-call CSVs in the browser. Falls back to the
- * GitHub contents API if manifest.json is missing (e.g. a folder was pushed
- * before the workflow ran). */
+/* Abyssal Audit Dashboard — per-language edition.
+ *
+ * Same dashboard as the English family (Raw Data / Results / Compare) plus a
+ * Languages switch and a Docs tab. Everything is driven by manifest.json,
+ * which CI rebuilds from audits/<country>/ on every push; if the manifest is
+ * missing the page lists the folders live through the GitHub contents API.
+ * Every metric is computed here, in the browser, from the raw per-call CSV. */
 (() => {
-  "use strict";
+'use strict';
 
-  // ---------- generic helpers ----------
-  const $ = (sel, el = document) => el.querySelector(sel);
-  const h = (tag, attrs = {}, ...kids) => {
-    const el = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
-      if (v == null) continue;
-      if (k === "class") el.className = v;
-      else if (k === "html") el.innerHTML = v;
-      else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
-      else el.setAttribute(k, v);
+// ═══════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════
+const VARS = ['exact', 'native_in_random', 'native_in_nearsyn', 'custom_in', 'native_out'];
+const VLBL = { exact: 'Exact', native_in_random: 'Native (Random)', native_in_nearsyn: 'Native (Near-Syn)', custom_in: 'Custom', native_out: 'Native (Gold excluded)' };
+const MODES = ['free', 'enum'];
+const INSC = new Set(['exact', 'native_in_random', 'native_in_nearsyn', 'custom_in']);
+const RH = 38, BUF = 25;
+const DEFAULT_GATES = { inscope: 94, nearsyn_free: 94, custom_free: 88, exact_free: 100, in_list: 100 };
+// Preferred raw-table columns & widths; any extra CSV columns are appended.
+const COLW = { case_id: 55, variant: 125, mode: 55, draw: 45, message: 240, gold: 120, expected: 110, output_norm: 120, matched: 55, in_list: 55, correct: 60, latency_ms: 75, tokens: 55, candidates: 260, output_raw: 120 };
+const COLPREF = ['case_id', 'variant', 'mode', 'draw', 'message', 'gold', 'expected', 'output_norm', 'matched', 'in_list', 'correct', 'latency_ms', 'tokens', 'candidates', 'output_raw'];
+const HIDE = new Set(['prompt']);
+
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+let manifest = null, country = null, models = [];
+let selModel = null, curData = [], filtData = [], sortCol = null, sortDir = 1, query = '', cols = [];
+const cache = {};          // file -> {h, r}
+let cmpSel = new Set(), cmpCache = {};
+let vsBody, vsScrollAttached = false, curDoc = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const T = v => /^(true|1|yes)$/i.test(String(v ?? '').trim());
+
+// ═══════════════════════════════════════
+// CSV PARSER (RFC4180-ish, handles quoted newlines)
+// ═══════════════════════════════════════
+function parseCSV(t) {
+  const rows = [], lines = [];
+  let i = 0;
+  while (i < t.length) {
+    const line = []; let f = '', q = false;
+    while (i < t.length) {
+      const c = t[i];
+      if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i += 2; } else { q = false; i++; } } else { f += c; i++; } }
+      else if (c === '"') { q = true; i++; }
+      else if (c === ',') { line.push(f); f = ''; i++; }
+      else if (c === '\n' || c === '\r') { if (c === '\r' && t[i + 1] === '\n') i++; i++; break; }
+      else { f += c; i++; }
     }
-    for (const kid of kids.flat()) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
-    return el;
-  };
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const pct = (a, b, d = 1) => (b && Number.isFinite(a) ? (100 * a / b).toFixed(d) + "%" : "–");
-  const num = (a, b) => (b ? 100 * a / b : NaN);
-  const truthy = (v) => /^(true|1|yes|y)$/i.test(String(v ?? "").trim());
-  const fmtBytes = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : n > 1e3 ? (n / 1e3).toFixed(0) + " kB" : n + " B";
-  const median = (xs) => { if (!xs.length) return NaN; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+    line.push(f);
+    if (line.length > 1 || line[0] !== '') lines.push(line);
+  }
+  if (!lines.length) return { h: [], r: [] };
+  const h = lines[0].map(x => x.replace(/^﻿/, ''));
+  for (let r = 1; r < lines.length; r++) { const o = {}; for (let c = 0; c < h.length; c++) o[h[c]] = c < lines[r].length ? lines[r][c] : ''; rows.push(o); }
+  return { h, r: rows };
+}
 
-  // ---------- metric model (mirrors no/scripts/score_audit_no.py) ----------
-  // Variants where the gold intent is offered → "in-scope" accuracy pool.
-  const INSCOPE = new Set(["exact", "native_in_random", "native_in_nearsyn", "custom_in"]);
-  const VARIANT_LABEL = {
-    exact: "Exact-phrase probes (adversarial traps)",
-    native_in_random: "In-taxonomy names, gold offered",
-    native_in_nearsyn: "+ forced near-synonym trap",
-    native_out: "Gold excluded — picks closest (in-list)",
-    custom_in: "Invented / custom names",
-  };
-  const GATE_DEFS = [
-    { key: "inscope", label: "In-scope accuracy", op: ">=", get: (m) => m.inscope },
-    { key: "nearsyn_free", label: "Near-synonym trap (free)", op: ">=", get: (m) => m.cell("native_in_nearsyn", "free") },
-    { key: "custom_free", label: "Invented names (free)", op: ">=", get: (m) => m.cell("custom_in", "free") },
-    { key: "exact_free", label: "Exact probes (free)", op: "=", get: (m) => m.cell("exact", "free") },
-    { key: "in_list", label: "In-list obedience (all calls)", op: "=", get: (m) => m.inList },
+// ═══════════════════════════════════════
+// MANIFEST
+// ═══════════════════════════════════════
+async function loadManifest() {
+  try { const r = await fetch('manifest.json', { cache: 'no-cache' }); if (!r.ok) throw new Error(r.status); return await r.json(); }
+  catch (e) { return manifestFromGitHub(); }
+}
+async function manifestFromGitHub() {
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/), repo = location.pathname.split('/').filter(Boolean)[0];
+  if (!m || !repo) throw new Error('manifest.json missing and not on GitHub Pages');
+  const dirs = await (await fetch(`https://api.github.com/repos/${m[1]}/${repo}/contents/audits`)).json();
+  if (!Array.isArray(dirs)) throw new Error('GitHub API unavailable');
+  const countries = [];
+  for (const d of dirs.filter(x => x.type === 'dir')) {
+    const files = await (await fetch(d.url)).json(); let meta = {};
+    const mf = files.find(f => f.name === 'meta.json'); if (mf) { try { meta = await (await fetch(mf.download_url)).json(); } catch (e) { /* ignore */ } }
+    countries.push({ key: d.name, name: meta.name || d.name[0].toUpperCase() + d.name.slice(1), language: meta.language || '', flag: meta.flag || '🏳️',
+      description: meta.description || '', scoring: meta.scoring, gates: { ...DEFAULT_GATES, ...(meta.gates || {}) }, stats: meta.stats || {},
+      runs: files.filter(f => /\.csv$/i.test(f.name)).map(f => ({ file: `audits/${d.name}/${f.name}`, name: f.name, bytes: f.size,
+        label: f.name.replace(/^results?[_-]/, '').replace(/\.csv$/i, '').replace(/_/g, ' '), baseline: /base|baseline|stock/i.test(f.name), ...((meta.runs || {})[f.name] || {}) })),
+      docs: files.filter(f => /\.md$/i.test(f.name)).map(f => ({ file: `audits/${d.name}/${f.name}`, name: f.name, bytes: f.size,
+        title: (meta.docs || {})[f.name] || f.name.replace(/\.md$/i, '').replace(/[_-]+/g, ' ') })) });
+  }
+  return { generated: null, countries };
+}
+
+// ═══════════════════════════════════════
+// FETCH
+// ═══════════════════════════════════════
+async function fetchData(file) {
+  if (cache[file]) return cache[file];
+  const resp = await fetch(file);
+  if (!resp.ok) throw new Error(`${file}: ${resp.status}`);
+  cache[file] = parseCSV(await resp.text());
+  return cache[file];
+}
+
+// ═══════════════════════════════════════
+// SIDEBAR
+// ═══════════════════════════════════════
+function initLangs() {
+  $('langCount').textContent = manifest.countries.length;
+  $('langList').innerHTML = manifest.countries.map(c =>
+    `<div class="l-item ${c === country ? 'active' : ''}" data-k="${esc(c.key)}" title="${esc(c.language)}"><span class="flag">${c.flag}</span>${esc(c.name)}</div>`).join('');
+  $('langList').querySelectorAll('.l-item').forEach(el => el.addEventListener('click', () => pickCountry(el.dataset.k)));
+}
+function modelId(run) { return run.name.replace(/\.csv$/i, ''); }
+function modelName(run) { return run.model ? run.model.replace(/^Abyssal\//, '').replace(/:latest$/, '') : run.label; }
+function modelTag(run) { return run.tag || (run.baseline ? 'Baseline' : run.primary ? 'Primary' : (run.label.match(/v\d+[a-z]?/i)?.[0] || 'Run')); }
+function initSidebar() {
+  models = country.runs.map(r => ({ id: modelId(r), name: modelName(r), tag: modelTag(r), f: r.file, run: r }));
+  $('modelCount').textContent = models.length;
+  $('modelList').innerHTML = models.length ? models.map(m =>
+    `<div class="m-item ${m.id === selModel ? 'active' : ''}" data-id="${esc(m.id)}" title="${esc(m.run.label)}">
+      <div class="m-dot ${m.run.baseline ? 'stock' : 'fine'}"></div>
+      <span class="m-name">${esc(m.name)}</span>
+      <span class="m-tag">${esc(m.tag)}</span>
+    </div>`).join('') : `<div class="empty" style="height:auto;padding:20px"><p>No CSV files in <code>audits/${esc(country.key)}/</code> yet.</p></div>`;
+  $('modelList').querySelectorAll('.m-item').forEach(el => el.addEventListener('click', () => pickModel(el.dataset.id)));
+  renderFoot();
+}
+function renderFoot() {
+  const s = country.stats || {}, parts = [];
+  if (s.intents) parts.push(`${s.intents} intents`);
+  if (s.domains) parts.push(`${s.domains} domains`);
+  if (s.cases) parts.push(`${s.cases} cases`);
+  if (s.calls) parts.push(`${Number(s.calls).toLocaleString()} calls/model`);
+  $('foot').innerHTML = (parts.length ? parts.join(' &middot; ') : esc(country.language)) +
+    `<br><span style="opacity:.7">${esc(country.language)}</span>` +
+    (manifest.generated ? `<br><span style="opacity:.55">manifest ${new Date(manifest.generated).toLocaleDateString()}</span>` : '');
+}
+
+function pickCountry(key, keepHash) {
+  const c = manifest.countries.find(x => x.key === key) || manifest.countries[0];
+  if (!c) return;
+  country = c; selModel = null; curData = []; filtData = []; cmpSel = new Set();
+  initLangs(); initSidebar(); initCmpSel(); initDocs();
+  $('cmpSub').textContent = `Select two or more ${c.name} models to compare side by side.`;
+  $('cmpMet').innerHTML = ''; $('cmpDif').innerHTML = '';
+  resetRaw();
+  $('resBox').innerHTML = '<div class="empty"><div class="ico">&#9672;</div><h3>No model selected</h3><p>Select a model to view computed results.</p></div>';
+  if (!keepHash) setHash();
+}
+function pickModel(id, keepHash) {
+  selModel = id;
+  document.querySelectorAll('.m-item').forEach(e => e.classList.toggle('active', e.dataset.id === id));
+  loadRaw(id);
+  if (!keepHash) setHash();
+}
+
+// ═══════════════════════════════════════
+// TABS + HASH ROUTING  (#norway/model=<id>/tab=results/doc=<file>)
+// ═══════════════════════════════════════
+function currentTab() { const a = document.querySelector('.tab.active'); return a ? a.dataset.t : 'raw'; }
+function showTab(v, keepHash) {
+  document.querySelectorAll('.tab').forEach(e => e.classList.toggle('active', e.dataset.t === v));
+  document.querySelectorAll('.tp').forEach(e => e.classList.toggle('on', e.id === 'p' + v.charAt(0).toUpperCase() + v.slice(1)));
+  if (v === 'compare') initCmpSel();
+  if (v === 'results' && selModel) renderResults(selModel);
+  if (!keepHash) setHash();
+}
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.t)));
+function setHash() {
+  const parts = [country?.key || ''];
+  if (selModel) parts.push('model=' + encodeURIComponent(selModel));
+  const tab = currentTab(); if (tab !== 'raw') parts.push('tab=' + tab);
+  if (curDoc && tab === 'docs') parts.push('doc=' + encodeURIComponent(curDoc));
+  const next = '#' + parts.join('/');
+  if (location.hash !== next) history.replaceState(null, '', next);
+}
+function applyHash() {
+  const [c, ...rest] = location.hash.replace(/^#\/?/, '').split('/');
+  const q = Object.fromEntries(rest.map(kv => kv.split('=').map(decodeURIComponent)));
+  if (!country || country.key !== c) pickCountry(c, true);
+  if (q.tab) showTab(q.tab, true);
+  if (q.doc) showDoc(q.doc, true);
+  if (q.model && models.some(m => m.id === q.model) && selModel !== q.model) pickModel(q.model, true);
+}
+window.addEventListener('hashchange', applyHash);
+
+// ═══════════════════════════════════════
+// RAW DATA + VIRTUAL SCROLL
+// ═══════════════════════════════════════
+function resetRaw() {
+  $('rEmpty').style.display = ''; $('rContent').style.display = 'none'; $('rLoad').style.display = 'none';
+  $('rcount').textContent = '0 rows'; $('dlink').style.display = 'none';
+}
+function buildCols(h) {
+  const present = new Set(h);
+  const order = [...COLPREF.filter(k => present.has(k)), ...h.filter(k => !COLPREF.includes(k))].filter(k => !HIDE.has(k));
+  cols = order.map(k => ({ k, l: k.replace(/_/g, ' ').replace(/\bms\b/, '(ms)'), w: COLW[k] || 110 }));
+}
+function renderHead() {
+  $('rHead').innerHTML = cols.map(c => {
+    const s = sortCol === c.k, a = s ? (sortDir === 1 ? '&#9650;' : '&#9660;') : '&#9661;';
+    return `<th style="width:${c.w}px" class="${s ? 'sorted' : ''}" data-k="${esc(c.k)}">${esc(c.l)}<span class="arr">${a}</span></th>`;
+  }).join('');
+  $('rHead').querySelectorAll('th').forEach(th => th.addEventListener('click', () => doSort(th.dataset.k)));
+}
+function doSort(col) {
+  if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = 1; }
+  applyFilter(); renderVS(); renderHead();
+}
+function applyFilter() {
+  let d = curData;
+  if (query) { const q = query.toLowerCase(); d = d.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))); }
+  if (sortCol) {
+    d = [...d].sort((a, b) => { const va = a[sortCol], vb = b[sortCol]; const na = Number(va), nb = Number(vb);
+      if (va !== '' && vb !== '' && !isNaN(na) && !isNaN(nb)) return (na - nb) * sortDir; return String(va).localeCompare(String(vb)) * sortDir; });
+  }
+  filtData = d;
+  $('rcount').textContent = d.length.toLocaleString() + ' rows';
+}
+function onVsScroll() { requestAnimationFrame(renderVS); }
+function renderVS() {
+  if (!vsBody) return;
+  const st = vsBody.scrollTop, vis = Math.ceil(vsBody.clientHeight / RH) + BUF, start = Math.max(0, Math.floor(st / RH) - BUF);
+  const rows = filtData, end = Math.min(rows.length, start + vis);
+  const totalW = cols.reduce((s, c) => s + c.w, 0);
+  let html = `<table style="width:${totalW}px;min-width:100%;border-collapse:collapse;table-layout:fixed"><colgroup>${cols.map(c => `<col style="width:${c.w}px">`).join('')}</colgroup><tbody>`;
+  if (start > 0) html += `<tr style="height:${start * RH}px"><td colspan="${cols.length}" style="padding:0;border:none"></td></tr>`;
+  for (let i = start; i < end; i++) {
+    const r = rows[i]; html += '<tr>';
+    for (const c of cols) {
+      const k = c.k, v = r[k] ?? ''; let cls = '';
+      if (k === 'matched' || k === 'in_list') cls = T(v) ? 'mt' : 'mf';
+      else if (k === 'correct') cls = T(v) ? 'ct' : 'cf';
+      else if (k === 'latency_ms') cls = 'lat';
+      const disp = k === 'latency_ms' ? (v ? Number(v).toFixed(0) + 'ms' : '') : v;
+      html += `<td class="${cls}" title="${esc(v)}">${esc(disp)}</td>`;
+    }
+    html += '</tr>';
+  }
+  if (end < rows.length) html += `<tr style="height:${(rows.length - end) * RH}px"><td colspan="${cols.length}" style="padding:0;border:none"></td></tr>`;
+  vsBody.innerHTML = html + '</tbody></table>';
+  const hdrTable = $('rHead').closest('table'); hdrTable.style.width = totalW + 'px'; hdrTable.style.minWidth = '100%';
+  $('rHead').closest('.raw-hdr').scrollLeft = vsBody.scrollLeft;
+}
+async function loadRaw(id) {
+  const m = models.find(x => x.id === id); if (!m) return;
+  $('rEmpty').style.display = 'none'; $('rContent').style.display = 'none';
+  const ld = $('rLoad'); ld.style.display = 'flex';
+  ld.innerHTML = `<div class="spinner"></div><div class="load-txt">Fetching audit data...</div><div class="load-sub">${esc(m.name)} &middot; ${esc(m.run.name)}</div>`;
+  try {
+    const d = await fetchData(m.f);
+    if (selModel !== id) return;
+    curData = d.r; buildCols(d.h);
+    sortCol = null; sortDir = 1; query = ''; $('sbox').value = '';
+    applyFilter(); renderHead();
+    ld.style.display = 'none'; $('rContent').style.display = 'flex';
+    const dl = $('dlink'); dl.href = m.f; dl.download = m.run.name; dl.style.display = ''; dl.title = `Download ${m.run.name} (${((m.run.bytes || 0) / 1e6).toFixed(1)} MB)`;
+    vsBody = $('rBody');
+    if (!vsScrollAttached) { vsBody.addEventListener('scroll', onVsScroll, { passive: true }); vsScrollAttached = true; }
+    vsBody.scrollTop = 0; renderVS();
+    if (currentTab() === 'results') renderResults(id);
+  } catch (e) {
+    ld.innerHTML = `<div class="empty"><div class="ico">&#9888;</div><h3>Failed to load</h3><p>${esc(e.message)}</p></div>`;
+  }
+}
+$('sbox').addEventListener('input', e => { query = e.target.value; applyFilter(); if (vsBody) vsBody.scrollTop = 0; renderVS(); });
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'f') { e.preventDefault(); $('sbox').focus(); } });
+
+// ═══════════════════════════════════════
+// METRICS
+// ═══════════════════════════════════════
+// Scoring mode. "refusal" (English family): on native_out the right behaviour is to
+// ESCAPE the list (none_of_the_above) → correct = not in_list. "accept_bias" (Norwegian
+// acv3): there is no refusal — native_out has no gold and is scored on in-list obedience.
+function scoringMode(rows) {
+  if (country?.scoring) return country.scoring;
+  const no = rows.filter(r => r.variant === 'native_out');
+  if (!no.length) return 'accept_bias';
+  return no.some(r => r.expected && !/^(none|null)$/i.test(r.expected)) ? 'refusal' : 'accept_bias';
+}
+function metrics(rows) {
+  const n = rows.length; if (!n) return null;
+  const mode = scoringMode(rows);
+  const bc = col => rows.filter(r => T(r[col])).length;
+  const sorted = xs => xs.filter(x => !isNaN(x) && x > 0).sort((a, b) => a - b);
+  const avg = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0;
+  const med = a => { if (!a.length) return 0; const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+  const p95 = a => a.length ? a[Math.floor(a.length * .95)] : 0;
+  const lat = sorted(rows.map(r => Number(r.latency_ms))), tok = rows.map(r => Number(r.tokens)).filter(x => !isNaN(x));
+  const il = bc('in_list');
+  const ok = r => r.variant === 'native_out' ? (mode === 'refusal' ? !T(r.in_list) : T(r.in_list)) : T(r.correct);
+  const bv = {}, bvm = {}, bm = {};
+  for (const v of VARS) {
+    const s = rows.filter(r => r.variant === v), sc = s.filter(ok).length; bv[v] = { t: s.length, c: sc, a: s.length ? sc / s.length : null };
+    for (const mo of MODES) { const sm = s.filter(r => r.mode === mo), scm = sm.filter(ok).length;
+      bvm[v + '|' + mo] = { t: sm.length, c: scm, a: sm.length ? scm / sm.length : null, il: sm.length ? sm.filter(r => T(r.in_list)).length / sm.length : null, ml: med(sorted(sm.map(r => Number(r.latency_ms)))) }; }
+  }
+  for (const m of MODES) { const s = rows.filter(r => r.mode === m && INSC.has(r.variant)), sc = s.filter(r => T(r.correct)).length; bm[m] = { t: s.length, c: sc, a: s.length ? sc / s.length : null }; }
+  const no = rows.filter(r => r.variant === 'native_out'), noFree = no.filter(r => r.mode === 'free');
+  const rej = no.filter(r => !T(r.in_list)).length, noIl = noFree.filter(r => T(r.in_list)).length;
+  const ins = rows.filter(r => INSC.has(r.variant)), inc = ins.filter(r => T(r.correct)).length, insIl = ins.filter(r => T(r.in_list)).length;
+  return { n, mode, il, acc: rows.filter(ok).length / n, ir: il / n, al: avg(lat), ml: med(lat), pl: p95(lat), at: avg(tok),
+    rr: no.length ? rej / no.length : null, not: no.length, noIl: noFree.length ? noIl / noFree.length : null, noFreeN: noFree.length,
+    inn: ins.length, iacc: ins.length ? inc / ins.length : null, iir: ins.length ? insIl / ins.length : null,
+    cst: bvm['custom_in|free']?.a ?? null, near: bvm['native_in_nearsyn|free']?.a ?? null, exact: bvm['exact|free']?.a ?? null,
+    cases: new Set(rows.map(r => r.case_id)).size, msgs: new Set(rows.map(r => r.message)).size, intents: new Set(rows.map(r => r.gold).filter(Boolean)).size,
+    bv, bvm, bm };
+}
+function gates(m) {
+  const g = country.gates || DEFAULT_GATES, p = v => v == null ? null : v * 100;
+  return [
+    { k: 'inscope', l: 'In-scope accuracy', op: '>=', v: p(m.iacc) },
+    { k: 'nearsyn_free', l: 'Near-syn trap (free)', op: '>=', v: p(m.near) },
+    { k: 'custom_free', l: 'Invented names (free)', op: '>=', v: p(m.cst) },
+    { k: 'exact_free', l: 'Exact probes (free)', op: '=', v: p(m.exact) },
+    { k: 'in_list', l: 'In-list obedience', op: '=', v: p(m.ir) },
+  ].filter(d => g[d.k] != null && d.v != null).map(d => ({ ...d, thr: +g[d.k], pass: d.op === '>=' ? d.v >= +g[d.k] - 1e-9 : Math.abs(d.v - +g[d.k]) < 0.05 }));
+}
+
+// ═══════════════════════════════════════
+// RESULTS
+// ═══════════════════════════════════════
+function renderResults(id) {
+  const box = $('resBox'), m0 = models.find(x => x.id === id), d = m0 && cache[m0.f];
+  if (!d) { box.innerHTML = '<div class="empty"><h3>Loading...</h3><p>Select the model in Raw Data tab first.</p></div>'; return; }
+  const m = metrics(d.r); if (!m) { box.innerHTML = '<div class="empty"><h3>No data</h3></div>'; return; }
+  const p = v => v == null ? '—' : (v * 100).toFixed(1) + '%', ms = v => v.toFixed(0) + 'ms';
+  const bc = v => v == null ? 'var(--text-muted)' : v >= .9 ? 'var(--green)' : v >= .7 ? 'var(--yellow)' : 'var(--red)';
+  const cl = v => v == null ? 'b' : v >= .9 ? 'g' : v >= .7 ? 'y' : 'r';
+  const gs = gates(m), gPass = gs.filter(x => x.pass).length, accept = m.mode === 'accept_bias';
+  const bar = (a) => `<td class="bcell"><div class="abar"><div class="abar-f" style="width:${(a || 0) * 100}%;background:${bc(a)}"></div></div></td>`;
+  box.innerHTML = `
+    <div class="res-hdr"><h2>${esc(m0.name)} ${gs.length ? `<span class="pill ${gPass === gs.length ? 'ok' : 'bad'}">${gPass}/${gs.length} gates</span>` : ''}</h2>
+      <p>${m.n.toLocaleString()} calls &middot; ${m.cases.toLocaleString()} cases &middot; ${m.msgs.toLocaleString()} messages &middot; ${p(m.iacc)} in-scope accuracy &middot; ${accept ? p(m.noIl) + ' in-list when gold excluded' : p(m.rr) + ' rejection'}${m0.run.model ? ` &middot; <code style="color:var(--cyan)">${esc(m0.run.model)}</code>` : ''}</p></div>
+    ${gs.length ? `<div class="gate-row">${gs.map(g => `<div class="gate ${g.pass ? 'ok' : 'bad'}"><span>${g.pass ? '&#10003;' : '&#10007;'}</span><span>${g.l}</span><span class="v">${g.v.toFixed(1)}%</span><span class="t">gate ${g.op} ${g.thr}%</span></div>`).join('')}</div>` : ''}
+    <div class="mgrid">
+      <div class="mcard"><div class="lb">In-Scope Accuracy</div><div class="vl ${cl(m.iacc)}">${p(m.iacc)}</div><div class="sb">${m.inn.toLocaleString()} calls where the gold intent was offered</div></div>
+      ${accept
+        ? `<div class="mcard"><div class="lb">Gold Excluded &rarr; In-List</div><div class="vl c">${p(m.noIl)}</div><div class="sb">picked the closest offered intent on ${m.noFreeN.toLocaleString()} accept-bias tests</div></div>`
+        : `<div class="mcard"><div class="lb">Rejection Rate</div><div class="vl c">${p(m.rr)}</div><div class="sb">escaped the list on ${m.not.toLocaleString()} refusal tests</div></div>`}
+      <div class="mcard"><div class="lb">Overall Accuracy</div><div class="vl ${cl(m.acc)}">${p(m.acc)}</div><div class="sb">${accept ? 'gold-excluded tests scored on in-list' : 'refusal tests scored strict'}</div></div>
+      <div class="mcard"><div class="lb">Avg Latency</div><div class="vl b">${ms(m.al)}</div><div class="sb">median ${ms(m.ml)}</div></div>
+      <div class="mcard"><div class="lb">P95 Latency</div><div class="vl b">${ms(m.pl)}</div><div class="sb">95th percentile</div></div>
+      <div class="mcard"><div class="lb">Avg Tokens</div><div class="vl c">${m.at ? m.at.toFixed(1) : '—'}</div><div class="sb">per response</div></div>
+      <div class="mcard"><div class="lb">Invented-Name Accuracy</div><div class="vl ${cl(m.cst)}">${p(m.cst)}</div><div class="sb">intents renamed to unseen labels (free)</div></div>
+      <div class="mcard"><div class="lb">Near-Synonym Trap</div><div class="vl ${cl(m.near)}">${p(m.near)}</div><div class="sb">favourite look-alike label IS offered (free)</div></div>
+      <div class="mcard"><div class="lb">In-List Obedience</div><div class="vl b">${p(m.ir)}</div><div class="sb">${p(m.iir)} across in-scope calls</div></div>
+      <div class="mcard"><div class="lb">Total Calls</div><div class="vl g">${m.n.toLocaleString()}</div><div class="sb">${m.intents.toLocaleString()} intents &middot; ${m.cases.toLocaleString()} cases &times; variant &times; mode &times; draw</div></div>
+    </div>
+    <div class="stitle"><span class="ic">&#9672;</span> Accuracy by Variant <span class="note">${accept ? 'Native (Gold excluded) scores in-list obedience, not a pick' : 'Native (Refusal) scores an escape from the list, not a pick'}</span></div>
+    <table class="btable"><thead><tr><th>Variant</th><th>Calls</th><th>Correct</th><th>Accuracy</th><th class="bcell">Visual</th></tr></thead><tbody>
+    ${VARS.filter(v => m.bv[v].t).map(v => { const x = m.bv[v]; return `<tr><td style="font-weight:600">${VLBL[v]}</td><td>${x.t.toLocaleString()}</td><td>${x.c.toLocaleString()}</td><td style="font-variant-numeric:tabular-nums;font-weight:600;color:${bc(x.a)}">${p(x.a)}</td>${bar(x.a)}</tr>`; }).join('')}
+    </tbody></table>
+    <div class="stitle"><span class="ic">&#9672;</span> Variant &times; Mode <span class="note">free generation vs enum-constrained decoding</span></div>
+    <table class="btable"><thead><tr><th>Variant</th><th>Mode</th><th>Calls</th><th>Top-1</th><th>In-list</th><th>Median</th><th class="bcell">Visual</th></tr></thead><tbody>
+    ${VARS.flatMap(v => MODES.map(mo => { const x = m.bvm[v + '|' + mo]; if (!x?.t) return ''; return `<tr><td style="font-weight:600">${VLBL[v]}</td><td>${mo}</td><td>${x.t.toLocaleString()}</td><td style="font-variant-numeric:tabular-nums;font-weight:600;color:${bc(x.a)}">${p(x.a)}</td><td>${p(x.il)}</td><td class="lat">${ms(x.ml)}</td>${bar(x.a)}</tr>`; })).join('')}
+    </tbody></table>
+    <div class="stitle"><span class="ic">&#9672;</span> In-Scope Accuracy by Mode <span class="note">gold-excluded tests excluded</span></div>
+    <table class="btable"><thead><tr><th>Mode</th><th>Calls</th><th>Correct</th><th>Accuracy</th><th class="bcell">Visual</th></tr></thead><tbody>
+    ${MODES.filter(mo => m.bm[mo].t).map(mo => { const x = m.bm[mo]; return `<tr><td style="font-weight:600">${mo === 'free' ? 'Free Generation' : 'Enum (Constrained)'}</td><td>${x.t.toLocaleString()}</td><td>${x.c.toLocaleString()}</td><td style="font-variant-numeric:tabular-nums;font-weight:600;color:${bc(x.a)}">${p(x.a)}</td>${bar(x.a)}</tr>`; }).join('')}
+    </tbody></table>`;
+}
+
+// ═══════════════════════════════════════
+// COMPARE
+// ═══════════════════════════════════════
+function initCmpSel() {
+  $('cmpSel').innerHTML = models.map(m => { const s = cmpSel.has(m.id);
+    return `<div class="cmp-chip ${s ? 'sel' : ''}" data-id="${esc(m.id)}"><span class="cmp-chk">${s ? '&#10003;' : ''}</span>${esc(m.name)} <span style="opacity:.6;font-size:.65rem">${esc(m.tag)}</span></div>`; }).join('');
+  $('cmpSel').querySelectorAll('.cmp-chip').forEach(el => el.addEventListener('click', () => togCmp(el.dataset.id)));
+  $('cmpActs').style.display = cmpSel.size > 0 ? '' : 'none';
+}
+function togCmp(id) {
+  if (cmpSel.has(id)) cmpSel.delete(id); else cmpSel.add(id);
+  initCmpSel();
+  const two = cmpSel.size === 2;
+  $('bDif').disabled = !two;
+  if (!two) cmpView('met');
+  renderCmpMet();
+}
+function cmpView(v) {
+  $('bMet').classList.toggle('on', v === 'met'); $('bDif').classList.toggle('on', v === 'dif');
+  $('cmpMet').style.display = v === 'met' ? '' : 'none'; $('cmpDif').style.display = v === 'dif' ? '' : 'none';
+  if (v === 'dif') renderDiff();
+}
+$('bMet').addEventListener('click', () => cmpView('met'));
+$('bDif').addEventListener('click', () => cmpView('dif'));
+async function renderCmpMet() {
+  const box = $('cmpMet'); if (!cmpSel.size) { box.innerHTML = ''; return; }
+  const ids = [...cmpSel];
+  box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)"><div class="spinner" style="margin:0 auto 10px"></div>Loading...</div>';
+  const ms = {};
+  for (const id of ids) { const m = models.find(x => x.id === id); try { const d = await fetchData(m.f); cmpCache[id] = d; ms[id] = metrics(d.r); } catch (e) { ms[id] = null; } }
+  const p = v => v != null ? (v * 100).toFixed(1) + '%' : '—', la = v => v != null ? v.toFixed(0) + 'ms' : '—';
+  const hl = (vals, hi) => { const nv = vals.map(v => v != null ? v : (hi ? -Infinity : Infinity)); const best = hi ? Math.max(...nv) : Math.min(...nv), worst = hi ? Math.min(...nv) : Math.max(...nv);
+    return vals.map(v => v == null ? '' : v === best && best !== worst ? 'best' : v === worst && best !== worst ? 'worst' : ''); };
+  const accept = ids.some(id => ms[id]?.mode === 'accept_bias');
+  const rows = [
+    { l: 'Total Calls', k: 'n', f: v => v?.toLocaleString() || '—', h: null },
+    { l: 'In-Scope Accuracy', k: 'iacc', f: p, h: true },
+    accept ? { l: 'Gold excluded → in-list', k: 'noIl', f: p, h: true } : { l: 'Rejection Rate', k: 'rr', f: p, h: true },
+    { l: 'Overall Accuracy', k: 'acc', f: p, h: true },
+    { l: 'In-List Obedience', k: 'ir', f: p, h: true },
+    { l: 'Gates passed', k: 'x', f: v => v ?? '—', h: null, gv: m => m ? `${gates(m).filter(g => g.pass).length}/${gates(m).length}` : null },
+    { l: 'Avg Latency', k: 'al', f: la, h: false },
+    { l: 'Median Latency', k: 'ml', f: la, h: false },
+    { l: 'P95 Latency', k: 'pl', f: la, h: false },
+    { l: 'Avg Tokens', k: 'at', f: v => v ? v.toFixed(1) : '—', h: null },
   ];
-
-  function computeMetrics(rows) {
-    const col = (r, k) => r[k] ?? "";
-    const variants = [...new Set(rows.map((r) => col(r, "variant")))];
-    const modes = [...new Set(rows.map((r) => col(r, "mode")))].filter(Boolean);
-    const order = ["exact", "native_in_random", "native_in_nearsyn", "native_out", "custom_in"];
-    const ix = (v) => { const i = order.indexOf(v); return i < 0 ? 99 : i; };
-    variants.sort((a, b) => ix(a) - ix(b) || a.localeCompare(b));
-    const cells = {};
-    for (const v of variants) for (const mo of modes) {
-      const rr = rows.filter((r) => col(r, "variant") === v && col(r, "mode") === mo);
-      cells[v + "|" + mo] = {
-        n: rr.length,
-        acc: num(rr.filter((r) => truthy(col(r, "correct"))).length, rr.length),
-        inList: num(rr.filter((r) => truthy(col(r, "in_list"))).length, rr.length),
-        latency: median(rr.map((r) => +col(r, "latency_ms")).filter((x) => x > 0)),
-      };
-    }
-    const insc = rows.filter((r) => INSCOPE.has(col(r, "variant")));
-    const nOut = rows.filter((r) => col(r, "variant") === "native_out" && col(r, "mode") === "free");
-    const misses = rows.filter((r) => INSCOPE.has(col(r, "variant")) && !truthy(col(r, "correct")));
-    const escapes = rows.filter((r) => !truthy(col(r, "in_list")));
-    return {
-      rows: rows.length, variants, modes, cells,
-      cell: (v, mo) => cells[v + "|" + mo]?.acc ?? NaN,
-      inscope: num(insc.filter((r) => truthy(col(r, "correct"))).length, insc.length),
-      inscopeN: insc.length,
-      inList: num(rows.filter((r) => truthy(col(r, "in_list"))).length, rows.length),
-      nativeOutInList: num(nOut.filter((r) => truthy(col(r, "in_list"))).length, nOut.length),
-      latency: median(rows.filter((r) => col(r, "mode") === "free").map((r) => +col(r, "latency_ms")).filter((x) => x > 0)),
-      messages: new Set(rows.map((r) => col(r, "message"))).size,
-      misses, escapes,
-    };
+  for (const v of VARS) rows.push({ l: `Accuracy: ${VLBL[v]}`, k: 'x', f: p, h: true, gv: m => m?.bv?.[v]?.a ?? null });
+  for (const mo of MODES) rows.push({ l: `In-scope accuracy: ${mo === 'free' ? 'Free Gen' : 'Enum'}`, k: 'x', f: p, h: true, gv: m => m?.bm?.[mo]?.a ?? null });
+  let h = '<table class="ctbl"><thead><tr><th>Metric</th>' + ids.map(id => `<th>${esc(models.find(m => m.id === id)?.name || id)}</th>`).join('') + '</tr></thead><tbody>';
+  for (const r of rows) {
+    const vals = ids.map(id => r.gv ? r.gv(ms[id]) : ms[id]?.[r.k] ?? null);
+    const cls = r.h != null ? hl(vals, r.h) : vals.map(() => '');
+    h += `<tr><td class="ml">${r.l}</td>` + ids.map((_, i) => `<td class="${cls[i]}">${r.f(vals[i])}</td>`).join('') + '</tr>';
   }
-  function gateResults(m, gates) {
-    // Gates whose variant is absent from the CSV are reported as n/a, not as failures.
-    return GATE_DEFS.filter((g) => gates[g.key] != null).map((g) => {
-      const val = g.get(m), thr = +gates[g.key];
-      const na = !Number.isFinite(val);
-      const pass = !na && (g.op === ">=" ? val >= thr - 1e-9 : Math.abs(val - thr) < 0.05);
-      return { ...g, val, thr, pass, na };
-    }).filter((g) => !g.na);
-  }
+  box.innerHTML = h + '</tbody></table>';
+}
 
-  // ---------- data loading ----------
-  const csvCache = new Map();
-  async function loadCsv(file) {
-    if (csvCache.has(file)) return csvCache.get(file);
-    const p = new Promise((resolve, reject) => {
-      Papa.parse(file, { download: true, header: true, skipEmptyLines: true, worker: false,
-        complete: (res) => resolve(res.data), error: reject });
-    });
-    csvCache.set(file, p);
-    return p;
-  }
-  const mdCache = new Map();
-  async function loadMd(file) {
-    if (!mdCache.has(file)) mdCache.set(file, fetch(file).then((r) => { if (!r.ok) throw new Error(r.status); return r.text(); }));
-    return mdCache.get(file);
-  }
+// ═══════════════════════════════════════
+// DIFF VIEW
+// ═══════════════════════════════════════
+async function renderDiff() {
+  const box = $('cmpDif'), ids = [...cmpSel];
+  if (ids.length !== 2) { box.innerHTML = '<p style="color:var(--text-muted);padding:20px">Select exactly 2 models.</p>'; return; }
+  box.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)"><div class="spinner" style="margin:0 auto 10px"></div>Computing diff...</div>';
+  for (const id of ids) { if (!cmpCache[id]) try { cmpCache[id] = await fetchData(models.find(m => m.id === id).f); } catch (e) { box.innerHTML = `<p style="color:var(--red);padding:20px">Failed: ${esc(e.message)}</p>`; return; } }
+  const a = cmpCache[ids[0]].r, b = cmpCache[ids[1]].r;
+  const rk = r => `${r.case_id}|${r.variant}|${r.mode}|${r.draw}`;
+  const mA = new Map(a.map(r => [rk(r), r])), mB = new Map(b.map(r => [rk(r), r]));
+  const diffs = [];
+  for (const [k, ra] of mA) { const rb = mB.get(k); if (rb && (ra.output_norm !== rb.output_norm || ra.correct !== rb.correct)) diffs.push({ ra, rb }); }
+  const oA = [...mA.keys()].filter(k => !mB.has(k)).length, oB = [...mB.keys()].filter(k => !mA.has(k)).length;
+  const nA = models.find(m => m.id === ids[0])?.name || ids[0], nB = models.find(m => m.id === ids[1])?.name || ids[1];
+  const dc = ['case_id', 'variant', 'mode', 'message', 'gold', 'output_norm', 'correct', 'in_list', 'latency_ms'];
+  const pane = (key, label) => {
+    let h = `<div class="diff-pane"><div class="diff-ph">${esc(label)}<span style="font-size:.68rem;color:var(--text-muted)">${diffs.length} diffs</span></div><table class="dtbl"><thead><tr>${dc.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+    for (const d of diffs.slice(0, 500)) { const r = d[key]; h += '<tr>';
+      for (const c of dc) { const v = r[c] || ''; const hlc = (c === 'output_norm' || c === 'correct') && d.ra.output_norm !== d.rb.output_norm ? 'dh' : '';
+        h += `<td class="${hlc}" title="${esc(v)}">${esc(c === 'latency_ms' && v ? Number(v).toFixed(0) + 'ms' : v)}</td>`; }
+      h += '</tr>'; }
+    return h + '</tbody></table></div>';
+  };
+  box.innerHTML = `<div class="diff-sum"><div class="diff-st"><strong>${diffs.length.toLocaleString()}</strong> differing rows</div><div class="diff-st"><strong>${oA}</strong> only in ${esc(nA)}</div><div class="diff-st"><strong>${oB}</strong> only in ${esc(nB)}</div><div class="diff-st">out of <strong>${a.length.toLocaleString()}</strong> shared</div></div>
+    <div class="diff-box">${pane('ra', nA)}${pane('rb', nB)}</div>
+    ${diffs.length > 500 ? `<p style="text-align:center;color:var(--text-muted);padding:14px;font-size:.78rem">Showing 500 of ${diffs.length.toLocaleString()} differences</p>` : ''}`;
+  const panes = box.querySelectorAll('.diff-pane'); let sync = false;
+  panes.forEach((pn, i) => pn.addEventListener('scroll', () => { if (sync) return; sync = true; panes[i ? 0 : 1].scrollTop = pn.scrollTop; sync = false; }, { passive: true }));
+}
 
-  // GitHub API fallback: derive owner/repo from *.github.io/<repo>/ URL.
-  async function manifestFromGitHub() {
-    const m = location.hostname.match(/^([^.]+)\.github\.io$/);
-    const repo = location.pathname.split("/").filter(Boolean)[0];
-    if (!m || !repo) throw new Error("not on github pages");
-    const api = `https://api.github.com/repos/${m[1]}/${repo}/contents/audits`;
-    const dirs = await (await fetch(api)).json();
-    if (!Array.isArray(dirs)) throw new Error("api");
-    const countries = [];
-    for (const d of dirs.filter((x) => x.type === "dir")) {
-      const files = await (await fetch(d.url)).json();
-      let meta = {};
-      const mf = files.find((f) => f.name === "meta.json");
-      if (mf) { try { meta = await (await fetch(mf.download_url)).json(); } catch { /* ignore */ } }
-      countries.push({
-        key: d.name, name: meta.name || d.name[0].toUpperCase() + d.name.slice(1), language: meta.language || "",
-        flag: meta.flag || "🏳️", description: meta.description || "",
-        gates: { inscope: 94, nearsyn_free: 94, custom_free: 88, exact_free: 100, in_list: 100, ...(meta.gates || {}) },
-        runs: files.filter((f) => /\.csv$/i.test(f.name)).map((f) => ({
-          file: `audits/${d.name}/${f.name}`, name: f.name, bytes: f.size, rows: null,
-          label: f.name.replace(/^results?[_-]/, "").replace(/\.csv$/i, "").replace(/_/g, " "),
-          baseline: /base|baseline|stock/i.test(f.name), ...((meta.runs || {})[f.name] || {}) })),
-        docs: files.filter((f) => /\.md$/i.test(f.name)).map((f) => ({
-          file: `audits/${d.name}/${f.name}`, name: f.name, bytes: f.size,
-          title: (meta.docs || {})[f.name] || f.name.replace(/\.md$/i, "").replace(/[_-]+/g, " ") })),
-      });
-    }
-    return { generated: null, countries, fromApi: true };
-  }
-  async function loadManifest() {
-    try {
-      const r = await fetch("manifest.json", { cache: "no-cache" });
-      if (!r.ok) throw new Error(r.status);
-      return await r.json();
-    } catch (e) {
-      return manifestFromGitHub();
-    }
-  }
+// ═══════════════════════════════════════
+// DOCS (Markdown from the language folder)
+// ═══════════════════════════════════════
+const mdCache = {};
+function initDocs() {
+  curDoc = null;
+  const tabs = $('docTabs'), box = $('docBox');
+  if (!country.docs.length) { tabs.innerHTML = ''; box.className = 'empty'; box.style = 'height:auto;padding:60px 20px'; box.innerHTML = '<div class="ico">&#9776;</div><h3>No documents</h3><p>Markdown files placed in the language folder (model cards, audit reports) render here.</p>'; return; }
+  tabs.innerHTML = country.docs.map(d => `<button class="btn" data-f="${esc(d.name)}">${esc(d.title)}</button>`).join('');
+  tabs.querySelectorAll('button').forEach(b => b.addEventListener('click', () => showDoc(b.dataset.f)));
+  showDoc((country.docs.find(d => /model[_-]?card/i.test(d.name)) || country.docs[0]).name, true);
+}
+async function showDoc(name, keepHash) {
+  const d = country.docs.find(x => x.name === name); if (!d) return;
+  curDoc = name;
+  $('docTabs').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.f === name));
+  const box = $('docBox'); box.className = 'md'; box.style = ''; box.innerHTML = '<div style="color:var(--text-muted)">Loading…</div>';
+  try {
+    if (!mdCache[d.file]) { const r = await fetch(d.file); if (!r.ok) throw new Error(r.status); mdCache[d.file] = await r.text(); }
+    box.innerHTML = DOMPurify.sanitize(marked.parse(mdCache[d.file], { gfm: true }));
+  } catch (e) { box.innerHTML = `<p style="color:var(--red)">Could not load ${esc(d.file)} (${esc(e.message)})</p>`; }
+  if (!keepHash) setHash();
+}
 
-  // ---------- routing ----------
-  const state = { manifest: null, country: null, run: null, doc: null, view: "overview" };
-  function parseHash() {
-    const [c, ...rest] = location.hash.replace(/^#\/?/, "").split("/");
-    const q = Object.fromEntries(rest.map((kv) => kv.split("=").map(decodeURIComponent)));
-    return { country: c || null, run: q.run || null, doc: q.doc || null };
-  }
-  function setHash(country, run, doc) {
-    const parts = [country];
-    if (run) parts.push("run=" + encodeURIComponent(run));
-    if (doc) parts.push("doc=" + encodeURIComponent(doc));
-    const next = "#" + parts.join("/");
-    if (location.hash !== next) history.replaceState(null, "", next);
-  }
-
-  // ---------- rendering ----------
-  const app = $("#app"), nav = $("#nav");
-
-  function renderNav() {
-    nav.replaceChildren(...state.manifest.countries.map((c) =>
-      h("a", { href: "#" + c.key, class: c.key === state.country?.key ? "active" : "" }, `${c.flag} ${c.name}`)));
-  }
-
-  function metricTile(k, v, d, cls) {
-    return h("div", { class: "tile" }, h("div", { class: "k" }, k), h("div", { class: "v " + (cls || "") }, v), d ? h("div", { class: "d" }, d) : null);
-  }
-
-  async function renderCountry(c) {
-    renderNav();
-    app.replaceChildren(
-      h("section", { class: "hero" },
-        h("h1", {}, `${c.flag} ${c.name}`, h("span", { class: "lang" }, c.language)),
-        h("p", { class: "sub" }, c.description || `${c.runs.length} audit run(s), ${c.docs.length} document(s).`)),
-      h("div", { id: "tiles", class: "grid" }, h("div", { class: "empty" }, h("span", { class: "spinner" }), "Computing metrics from ", c.runs.length, " CSV file(s)…")),
-      h("div", { id: "runs" }), h("div", { id: "detail" }), h("div", { id: "docs" }));
-
-    if (!c.runs.length) {
-      $("#tiles").replaceChildren(h("div", { class: "empty" }, "No CSV audit files in audits/", c.key, "/ yet."));
-    }
-    // Load all runs in parallel, compute metrics.
-    const results = await Promise.all(c.runs.map(async (r) => {
-      try { return { run: r, m: computeMetrics(await loadCsv(r.file)) }; }
-      catch (e) { return { run: r, error: e }; }
-    }));
-    if (state.country !== c) return; // navigated away
-    const good = results.filter((x) => x.m);
-    const primary = good.find((x) => x.run.primary) || good.filter((x) => !x.run.baseline).sort((a, b) => b.m.inscope - a.m.inscope)[0] || good[0];
-    const baseline = good.find((x) => x.run.baseline && x !== primary);
-
-    // Tiles (headline = primary run)
-    if (primary) {
-      const m = primary.m, g = gateResults(m, c.gates), passed = g.filter((x) => x.pass).length;
-      const d = (v) => baseline && Number.isFinite(v) ? v : null;
-      const delta = (a, b) => Number.isFinite(b) ? h("span", { class: "delta " + (a - b >= 0 ? "up" : "down") }, (a - b >= 0 ? "+" : "") + (a - b).toFixed(1) + " vs baseline") : null;
-      $("#tiles").replaceChildren(
-        metricTile("In-scope accuracy", pct(m.inscope, 100), h("span", {}, m.inscopeN.toLocaleString(), " calls ", delta(m.inscope, baseline?.m.inscope))),
-        metricTile("Near-synonym trap", pct(m.cell("native_in_nearsyn", "free"), 100), h("span", {}, "free generation ", delta(m.cell("native_in_nearsyn", "free"), baseline?.m.cell("native_in_nearsyn", "free")))),
-        metricTile("Invented names", pct(m.cell("custom_in", "free"), 100), h("span", {}, "free generation ", delta(m.cell("custom_in", "free"), baseline?.m.cell("custom_in", "free")))),
-        metricTile("In-list obedience", pct(m.inList, 100), `${m.rows.toLocaleString()} calls`),
-        metricTile("Gates", `${passed}/${g.length}`, passed === g.length ? "all passed" : g.filter((x) => !x.pass).map((x) => x.label).join(", "), passed === g.length ? "" : ""),
-        metricTile("Median latency", Number.isFinite(m.latency) ? (m.latency / 1000).toFixed(2) + " s" : "–", "free mode"));
-    }
-
-    // Runs comparison table
-    const cols = [["Run", null], ["Model", null], ["Calls", "rows"], ["Messages", "messages"], ["In-scope", "inscope"],
-      ["Rand free", "native_in_random|free"], ["Near-syn free", "native_in_nearsyn|free"], ["Custom free", "custom_in|free"],
-      ["Exact free", "exact|free"], ["Enum acc", "enum"], ["In-list", "inList"], ["Out→in-list", "nativeOutInList"], ["Latency", "latency"], ["Gates", "gates"]];
-    const tbl = h("table", {}, h("thead", {}, h("tr", {}, ...cols.map(([t]) => h("th", {}, t)))),
-      h("tbody", {}, ...results.map((x) => {
-        const r = x.run;
-        if (!x.m) return h("tr", {}, h("td", {}, r.label), h("td", { colspan: cols.length - 1, class: "small" }, "could not load: ", String(x.error)));
-        const m = x.m, g = gateResults(m, c.gates), passed = g.filter((y) => y.pass).length;
-        const enumAcc = (() => { const rr = m.variants.filter((v) => INSCOPE.has(v)).map((v) => m.cells[v + "|enum"]).filter(Boolean); const n = rr.reduce((s, y) => s + y.n, 0); return n ? rr.reduce((s, y) => s + y.acc * y.n, 0) / n : NaN; })();
-        const tr = h("tr", { class: "clickable " + (x === primary ? "primary " : "") + (state.run === r.name ? "selected" : ""), onclick: () => selectRun(c, r.name) },
-          h("td", {}, r.label, " ", r.baseline ? h("span", { class: "badge neutral" }, "baseline") : x === primary ? h("span", { class: "badge ok" }, "primary") : null),
-          h("td", { class: "mono small" }, r.model || "—"),
-          h("td", {}, m.rows.toLocaleString()), h("td", {}, m.messages.toLocaleString()),
-          h("td", {}, pct(m.inscope, 100)), h("td", {}, pct(m.cell("native_in_random", "free"), 100)),
-          h("td", {}, pct(m.cell("native_in_nearsyn", "free"), 100)), h("td", {}, pct(m.cell("custom_in", "free"), 100)),
-          h("td", {}, pct(m.cell("exact", "free"), 100)), h("td", {}, pct(enumAcc, 100)),
-          h("td", {}, pct(m.inList, 100)), h("td", {}, pct(m.nativeOutInList, 100)),
-          h("td", {}, Number.isFinite(m.latency) ? (m.latency / 1000).toFixed(2) + " s" : "–"),
-          h("td", {}, h("span", { class: "badge " + (passed === g.length ? "ok" : passed >= g.length - 1 ? "warn" : "bad") }, `${passed}/${g.length}`)));
-        return tr;
-      })));
-    $("#runs").replaceChildren(h("div", { class: "card" },
-      h("h2", {}, "Audit runs", h("span", { class: "hint" }, "click a run for the full breakdown · metrics computed live from the CSV")),
-      h("div", { class: "tablewrap" }, tbl)));
-
-    // Bars: primary vs baseline per variant (free)
-    if (primary) {
-      const bars = h("div", { class: "bars" });
-      for (const v of primary.m.variants) {
-        const isOut = v === "native_out";
-        const val = isOut ? primary.m.cells[v + "|free"]?.inList : primary.m.cells[v + "|free"]?.acc;
-        const bval = isOut ? baseline?.m.cells[v + "|free"]?.inList : baseline?.m.cells[v + "|free"]?.acc;
-        if (!Number.isFinite(val)) continue;
-        const gateKey = { native_in_nearsyn: "nearsyn_free", custom_in: "custom_free", exact: "exact_free" }[v];
-        const gate = gateKey ? c.gates[gateKey] : null;
-        bars.append(h("div", { class: "bar" }, h("div", {}, VARIANT_LABEL[v] || v), h("div", { class: "track" }, h("div", { class: "fill", style: `width:${val}%` }), gate != null ? h("div", { class: "gate", style: `left:${gate}%`, title: `gate ${gate}%` }) : null), h("div", { class: "n" }, val.toFixed(1) + "%")));
-        if (Number.isFinite(bval)) bars.append(h("div", { class: "bar base" }, h("div", { class: "small" }, "↳ " + (baseline.run.model || baseline.run.label)), h("div", { class: "track" }, h("div", { class: "fill", style: `width:${bval}%` })), h("div", { class: "n" }, bval.toFixed(1) + "%")));
-      }
-      $("#runs").append(h("div", { class: "card" }, h("h2", {}, `${primary.run.label}`, h("span", { class: "hint" }, baseline ? `vs ${baseline.run.label} · free generation · orange tick = gate` : "free generation · orange tick = gate")), h("div", { class: "body" }, bars)));
-    }
-
-    // Detail for selected run (default: primary)
-    const sel = c.runs.find((r) => r.name === state.run) || primary?.run;
-    if (sel) await renderRunDetail(c, sel, results.find((x) => x.run === sel)?.m);
-    renderDocs(c);
-  }
-
-  function selectRun(c, name) {
-    state.run = name; setHash(c.key, name, state.doc);
-    document.querySelectorAll("#runs tr.clickable").forEach((tr) => tr.classList.toggle("selected", tr.firstChild.textContent.startsWith(c.runs.find((r) => r.name === name)?.label || " ")));
-    renderRunDetail(c, c.runs.find((r) => r.name === name));
-    $("#detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  async function renderRunDetail(c, run, m) {
-    const box = $("#detail"); if (!box) return;
-    box.replaceChildren(h("div", { class: "card" }, h("h2", {}, run.label), h("div", { class: "empty" }, h("span", { class: "spinner" }), "Loading…")));
-    m = m || computeMetrics(await loadCsv(run.file));
-    if (state.country !== c) return;
-    const g = gateResults(m, c.gates);
-    // variant × mode table
-    const vt = h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Variant"), h("th", {}, "Mode"), h("th", {}, "N"), h("th", {}, "Top-1"), h("th", {}, "In-list"), h("th", {}, "Median ms"))),
-      h("tbody", {}, ...m.variants.flatMap((v) => m.modes.map((mo) => { const ce = m.cells[v + "|" + mo]; if (!ce?.n) return null;
-        return h("tr", {}, h("td", {}, VARIANT_LABEL[v] || v, " ", h("code", { class: "small" }, v)), h("td", {}, mo), h("td", {}, ce.n.toLocaleString()),
-          h("td", {}, v === "native_out" ? "—" : pct(ce.acc, 100)), h("td", {}, pct(ce.inList, 100)), h("td", {}, Number.isFinite(ce.latency) ? Math.round(ce.latency) : "–")); }))));
-    // misses explorer
-    const variantsWithMisses = [...new Set(m.misses.map((r) => r.variant))];
-    const search = h("input", { type: "search", placeholder: "filter misses (message, gold, prediction)…" });
-    const vsel = h("select", {}, h("option", { value: "" }, "all variants"), ...variantsWithMisses.map((v) => h("option", { value: v }, v)));
-    const msel = h("select", {}, h("option", { value: "" }, "all modes"), ...m.modes.map((v) => h("option", { value: v }, v)));
-    const list = h("tbody");
-    const count = h("span", { class: "hint" });
-    const renderMisses = () => {
-      const q = search.value.trim().toLowerCase();
-      const rows = m.misses.filter((r) => (!vsel.value || r.variant === vsel.value) && (!msel.value || r.mode === msel.value) &&
-        (!q || [r.message, r.gold, r.output_norm, r.output_raw].some((x) => String(x ?? "").toLowerCase().includes(q))));
-      count.textContent = `${rows.length.toLocaleString()} of ${m.misses.length.toLocaleString()} misses (in-scope variants)`;
-      list.replaceChildren(...rows.slice(0, 500).map((r) => h("tr", {},
-        h("td", { class: "small" }, r.variant, h("br"), h("span", { class: "badge neutral" }, r.mode)),
-        h("td", { class: "msg" }, r.message),
-        h("td", {}, h("code", {}, r.gold ?? r.expected)),
-        h("td", {}, h("code", { class: truthy(r.in_list) ? "" : "bad" }, r.output_norm || r.output_raw), truthy(r.in_list) ? null : h("span", { class: "badge bad", style: "margin-left:6px" }, "not in list")),
-        h("td", { class: "small msg" }, String(r.candidates ?? "").split("|").join(" · ")))));
-      if (rows.length > 500) list.append(h("tr", {}, h("td", { colspan: 5, class: "small" }, `… ${rows.length - 500} more (refine the filter)`)));
-    };
-    [search, vsel, msel].forEach((el) => el.addEventListener("input", renderMisses)); renderMisses();
-    box.replaceChildren(
-      h("div", { class: "card" },
-        h("h2", {}, run.label, run.model ? h("code", { class: "small" }, run.model) : null, h("span", { class: "hint" }, `${m.rows.toLocaleString()} calls · ${m.messages.toLocaleString()} distinct messages · `, h("a", { href: run.file, download: run.name }, "download CSV"), ` (${fmtBytes(run.bytes || 0)})`)),
-        h("div", { class: "body" },
-          h("div", { class: "gates" }, ...g.map((x) => h("div", { class: "g " + (x.pass ? "ok" : "bad") }, h("span", {}, x.pass ? "✔" : "✘"), h("span", {}, x.label), h("b", {}, pct(x.val, 100)), h("span", { class: "small" }, `gate ${x.op} ${x.thr}%`)))),
-          h("div", { class: "tablewrap", style: "margin-top:14px" }, vt))),
-      h("div", { class: "card" },
-        h("h2", {}, "Misses", count),
-        h("div", { class: "body" }, h("div", { class: "toolbar" }, search, vsel, msel),
-          m.misses.length ? h("div", { class: "tablewrap" }, h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Variant"), h("th", {}, "Message"), h("th", {}, "Gold"), h("th", {}, "Predicted"), h("th", {}, "Candidates"))), list)) : h("div", { class: "empty" }, "No misses. 🎉"))));
-  }
-
-  function renderDocs(c) {
-    const box = $("#docs"); if (!box || !c.docs.length) return;
-    const tabs = h("div", { class: "tabs" }), body = h("div", { class: "md" });
-    const show = async (d) => {
-      state.doc = d.name; setHash(c.key, state.run, d.name);
-      tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.f === d.name));
-      body.replaceChildren(h("div", { class: "empty" }, h("span", { class: "spinner" }), "Loading…"));
-      try {
-        const md = await loadMd(d.file);
-        body.innerHTML = DOMPurify.sanitize(marked.parse(md, { gfm: true, breaks: false }));
-      } catch (e) { body.replaceChildren(h("div", { class: "empty" }, "Could not load ", d.file)); }
-    };
-    for (const d of c.docs) tabs.append(h("button", { "data-f": d.name, onclick: () => show(d) }, d.title));
-    box.replaceChildren(h("div", { class: "card" }, h("h2", {}, "Reports & model cards", h("span", { class: "hint" }, "rendered from the Markdown files in the folder")), tabs, body));
-    show(c.docs.find((d) => d.name === state.doc) || c.docs.find((d) => /model_card/i.test(d.name)) || c.docs[0]);
-  }
-
-  function renderHome() {
-    renderNav();
-    const cs = state.manifest.countries;
-    app.replaceChildren(
-      h("section", { class: "hero" }, h("h1", {}, "Intent-classifier audits"),
-        h("p", { class: "sub" }, "Per-language audits and model cards for the Abyssal intent-classifier family. Every number on this site is computed in your browser from the raw per-call CSV — nothing is precomputed, nothing is hand-edited.")),
-      h("div", { class: "grid" }, ...cs.map((c) => h("a", { class: "tile", href: "#" + c.key, style: "text-decoration:none;color:inherit" },
-        h("div", { class: "v" }, `${c.flag} ${c.name}`), h("div", { class: "k" }, c.language), h("div", { class: "d" }, `${c.runs.length} run(s) · ${c.docs.length} doc(s)`)))),
-      howTo());
-  }
-
-  function howTo() {
-    return h("div", { class: "card" }, h("h2", {}, "Adding a language"), h("div", { class: "body" },
-      h("p", {}, "Create ", h("code", {}, "audits/<country>/"), " and drop in the per-call CSV(s) from the audit harness plus any Markdown reports or model cards. Push. The workflow rebuilds ", h("code", {}, "manifest.json"), " and the folder appears in the navigation — no code changes."),
-      h("pre", {}, `audits/
-  norway/                     ← 🇳🇴 shown today
-  denmark/                    ← add this folder and it just shows up
-    meta.json                 (optional: name, flag, language, gates, run labels)
-    results_10k_da-acv3.csv   any *.csv with variant, mode, correct, in_list, latency_ms columns
-    results_10k_baseline.csv  name it *baseline* to mark it as the reference model
-    MODEL_CARD_da-acv3.md     any *.md is rendered as a tab`),
-      h("p", { class: "small" }, "Country name, flag and language are inferred from the folder name for common countries; ", h("code", {}, "meta.json"), " overrides everything. CSV columns used: ", h("code", {}, "variant, mode, correct, in_list, latency_ms, message, gold, output_norm, candidates"), ".")));
-  }
-
-  async function route() {
-    const { country, run, doc } = parseHash();
-    const c = state.manifest.countries.find((x) => x.key === country);
-    state.run = run; state.doc = doc;
-    if (!c) { state.country = null; renderHome(); return; }
-    state.country = c; await renderCountry(c);
-  }
-
-  (async () => {
-    try { state.manifest = await loadManifest(); }
-    catch (e) { app.replaceChildren(h("div", { class: "empty" }, "Could not load manifest.json (", String(e), ")")); return; }
-    if (!state.manifest.countries?.length) { app.replaceChildren(h("div", { class: "empty" }, "No audits yet."), howTo()); return; }
-    if (!location.hash && state.manifest.countries.length === 1) history.replaceState(null, "", "#" + state.manifest.countries[0].key);
-    window.addEventListener("hashchange", route);
-    await route();
-    const gen = state.manifest.generated ? new Date(state.manifest.generated).toLocaleString() : "live from GitHub API";
-    app.append(h("footer", {}, `Manifest built ${gen}. Source and raw data: this repository. Metrics follow `, h("code", {}, "score_audit_no.py"), " (in-scope = correct answers over exact + in-taxonomy + near-synonym + invented-name calls, both modes)."));
-  })();
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+(async () => {
+  try { manifest = await loadManifest(); }
+  catch (e) { $('foot').textContent = 'Could not load manifest: ' + e.message; $('rEmpty').innerHTML = `<div class="ico">&#9888;</div><h3>No manifest</h3><p>${esc(e.message)}</p>`; return; }
+  if (!manifest.countries?.length) { $('foot').textContent = 'No audits yet'; $('rEmpty').innerHTML = '<div class="ico">&#8862;</div><h3>No audits yet</h3><p>Create <code>audits/&lt;country&gt;/</code>, drop the CSV files in, push.</p>'; return; }
+  applyHash();
+  // Deep-link convenience: auto-load the primary model when none is selected
+  if (!selModel && models.length) pickModel((models.find(m => m.run.primary) || models.find(m => !m.run.baseline) || models[0]).id, true);
+})();
 })();

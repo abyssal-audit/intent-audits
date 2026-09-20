@@ -31,11 +31,18 @@ LANGS = {"norway": "Norwegian (bokmål · nynorsk)", "denmark": "Danish", "swede
 
 
 def count_rows(p: Path):
+    """Return (header, n_rows, stats) — stats = distinct cases / intents for the footer."""
+    cases, intents, n = set(), set(), 0
     with open(p, encoding="utf-8", errors="replace", newline="") as f:
-        r = csv.reader(f)
-        header = next(r, [])
-        n = sum(1 for _ in r)
-    return header, n
+        r = csv.DictReader(f)
+        header = r.fieldnames or []
+        for row in r:
+            n += 1
+            if row.get("case_id"):
+                cases.add(row["case_id"])
+            if row.get("gold"):
+                intents.add(row["gold"])
+    return header, n, {"cases": len(cases), "intents": len(intents), "calls": n}
 
 
 def guess_run(fname: str):
@@ -59,8 +66,8 @@ def scan_country(d: Path):
             continue
         rel = f"audits/{d.name}/{p.name}"
         if p.suffix.lower() == ".csv":
-            header, n = count_rows(p)
-            r = {"file": rel, "name": p.name, "rows": n, "bytes": p.stat().st_size, "columns": header}
+            header, n, st = count_rows(p)
+            r = {"file": rel, "name": p.name, "rows": n, "bytes": p.stat().st_size, "columns": header, "stats": st}
             r.update(guess_run(p.name))
             r.update((meta.get("runs") or {}).get(p.name, {}))
             runs.append(r)
@@ -68,7 +75,12 @@ def scan_country(d: Path):
             docs.append({"file": rel, "name": p.name, "bytes": p.stat().st_size,
                          "title": (meta.get("docs") or {}).get(p.name)
                          or re.sub(r"[_-]+", " ", p.stem).strip()})
+    # Footer stats: from meta.json, else from the primary (or first non-baseline) run.
+    primary = next((r for r in runs if r.get("primary")), None) or next((r for r in runs if not r.get("baseline")), None) or (runs[0] if runs else None)
+    stats = {**(primary["stats"] if primary else {}), **(meta.get("stats") or {})}
     return {
+        "scoring": meta.get("scoring"),   # "accept_bias" | "refusal" | None (auto-detect)
+        "stats": stats,
         "key": d.name,
         "name": meta.get("name") or d.name.capitalize(),
         "language": meta.get("language") or LANGS.get(key, ""),
