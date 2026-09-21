@@ -2,7 +2,7 @@
   "name": "Norway",
   "language": "Norwegian (bokmål · nynorsk · dialect)",
   "flag": "🇳🇴",
-  "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution: the catalog's intents and seed phrasings are in the model's training set — see the model card for held-out numbers (MASSIVE nb-NO 92.2%, unseen intents 91.5%).",
+  "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution for no-acv3/no-acv4 (catalog seeds are in training) — see the model cards for held-out numbers: hand-written near-synonym set 97.8% (acv4) vs 95.0% (acv3), MASSIVE unseen intents 93.9%.",
   "gates": {
     "inscope": 94,
     "nearsyn_free": 94,
@@ -12,11 +12,11 @@
   },
   "runs": {
     "results_10k_no-acv3_v3b.csv": {
-      "label": "no-acv3 v3b · 10k profile",
+      "label": "no-acv3 · 10k profile",
       "model": "Abyssal/intent-classifier-general-no-acv3:1.5b",
       "baseline": false,
-      "primary": true,
-      "tag": "10k · v3b"
+      "primary": false,
+      "tag": "acv3"
     },
     "results_10k_qwen2.5-1.5b_baseline.csv": {
       "label": "stock qwen2.5:1.5b · 10k profile",
@@ -34,13 +34,22 @@
       "label": "English acv3 on the Norwegian audit",
       "model": "Abyssal/intent-classifier-general-acv3:1.5b",
       "tag": "EN acv3"
+    },
+    "results_10k_no-acv4.csv": {
+      "label": "no-acv4 · 10k profile",
+      "model": "Abyssal/intent-classifier-general-no-acv4:1.5b",
+      "tag": "acv4",
+      "primary": true
     }
   },
   "docs": {
+    "MODEL_CARD_no-acv4.md": "Model card · no-acv4",
     "MODEL_CARD_no-acv3.md": "Model card · no-acv3",
-    "AUDIT_REPORT_10K_no-acv3_v3b.md": "Audit report · no-acv3 v3b (10k)",
-    "AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md": "Audit report · stock qwen2.5:1.5b (10k)",
-    "AUDIT_REPORT_10K_en-acv3_reference.md": "Audit report · English acv3 (10k)"
+    "HELDOUT_COMPARISON_no-acv4.md": "Held-out comparison · all models",
+    "AUDIT_REPORT_10K_no-acv4.md": "Audit report · no-acv4 (10k)",
+    "AUDIT_REPORT_10K_no-acv3_v3b.md": "Audit report · no-acv3 (10k)",
+    "AUDIT_REPORT_10K_en-acv3_reference.md": "Audit report · English acv3 (10k)",
+    "AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md": "Audit report · stock qwen2.5:1.5b (10k)"
   },
   "scoring": "accept_bias",
   "stats": {

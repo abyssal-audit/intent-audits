@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-20T10:13:38Z",
+  "generated": "2026-09-21T02:14:57Z",
   "countries": [
     {
       "scoring": "accept_bias",
@@ -13,7 +13,7 @@
       "name": "Norway",
       "language": "Norwegian (bokmål · nynorsk · dialect)",
       "flag": "🇳🇴",
-      "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution: the catalog's intents and seed phrasings are in the model's training set — see the model card for held-out numbers (MASSIVE nb-NO 92.2%, unseen intents 91.5%).",
+      "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution for no-acv3/no-acv4 (catalog seeds are in training) — see the model cards for held-out numbers: hand-written near-synonym set 97.8% (acv4) vs 95.0% (acv3), MASSIVE unseen intents 93.9%.",
       "gates": {
         "inscope": 94,
         "nearsyn_free": 94,
@@ -83,11 +83,45 @@
             "intents": 128,
             "calls": 10008
           },
-          "label": "no-acv3 v3b · 10k profile",
+          "label": "no-acv3 · 10k profile",
           "baseline": false,
           "model": "Abyssal/intent-classifier-general-no-acv3:1.5b",
-          "primary": true,
-          "tag": "10k · v3b"
+          "primary": false,
+          "tag": "acv3"
+        },
+        {
+          "file": "audits/norway/results_10k_no-acv4.csv",
+          "name": "results_10k_no-acv4.csv",
+          "rows": 10008,
+          "bytes": 7333308,
+          "columns": [
+            "case_id",
+            "variant",
+            "mode",
+            "draw",
+            "message",
+            "gold",
+            "candidates",
+            "expected",
+            "prompt",
+            "output_raw",
+            "output_norm",
+            "matched",
+            "in_list",
+            "correct",
+            "latency_ms",
+            "tokens"
+          ],
+          "stats": {
+            "cases": 952,
+            "intents": 128,
+            "calls": 10008
+          },
+          "label": "no-acv4 · 10k profile",
+          "baseline": false,
+          "model": "Abyssal/intent-classifier-general-no-acv4:1.5b",
+          "tag": "acv4",
+          "primary": true
         },
         {
           "file": "audits/norway/results_10k_qwen2.5-1.5b_baseline.csv",
@@ -167,7 +201,13 @@
           "file": "audits/norway/AUDIT_REPORT_10K_no-acv3_v3b.md",
           "name": "AUDIT_REPORT_10K_no-acv3_v3b.md",
           "bytes": 29009,
-          "title": "Audit report · no-acv3 v3b (10k)"
+          "title": "Audit report · no-acv3 (10k)"
+        },
+        {
+          "file": "audits/norway/AUDIT_REPORT_10K_no-acv4.md",
+          "name": "AUDIT_REPORT_10K_no-acv4.md",
+          "bytes": 29043,
+          "title": "Audit report · no-acv4 (10k)"
         },
         {
           "file": "audits/norway/AUDIT_REPORT_10K_qwen2.5-1.5b_baseline.md",
@@ -176,10 +216,22 @@
           "title": "Audit report · stock qwen2.5:1.5b (10k)"
         },
         {
+          "file": "audits/norway/HELDOUT_COMPARISON_no-acv4.md",
+          "name": "HELDOUT_COMPARISON_no-acv4.md",
+          "bytes": 886,
+          "title": "Held-out comparison · all models"
+        },
+        {
           "file": "audits/norway/MODEL_CARD_no-acv3.md",
           "name": "MODEL_CARD_no-acv3.md",
-          "bytes": 7567,
+          "bytes": 7623,
           "title": "Model card · no-acv3"
+        },
+        {
+          "file": "audits/norway/MODEL_CARD_no-acv4.md",
+          "name": "MODEL_CARD_no-acv4.md",
+          "bytes": 8615,
+          "title": "Model card · no-acv4"
         }
       ]
     }
