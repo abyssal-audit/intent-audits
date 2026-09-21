@@ -71,9 +71,9 @@ On the hand-written set no-acv4 fixes four of no-acv3's seven misses and breaks 
 
 | Usage | Free-gen acc | In-list | Enum-constrained acc | In-list |
 | --- | --- | --- | --- | --- |
-| In-taxonomy names, gold offered | 99.7% | 100% | 99.4% | 100% |
-| + near-synonym trap | 99.6% | 100% | 99.3% | 100% |
-| Invented / custom names | 99.4% | 100% | 99.9% | 100% |
+| In-taxonomy names, gold offered | 99.6% | 100% | 99.7% | 100% |
+| + near-synonym trap | 99.5% | 100% | 99.5% | 100% |
+| Invented / custom names | 99.7% | 100% | 99.7% | 100% |
 | Exact-phrase probes | 100% | 100% | 100% | 100% |
 
 ## no-acv4 vs no-acv3 vs the English acv3 vs stock qwen
