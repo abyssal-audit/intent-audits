@@ -2,7 +2,7 @@
   "name": "Norway",
   "language": "Norwegian (bokmål · nynorsk · dialect)",
   "flag": "🇳🇴",
-  "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution for no-acv3/no-acv4 (catalog seeds are in training) — see the model cards for held-out numbers: hand-written near-synonym set 97.8% (acv4) vs 95.0% (acv3), MASSIVE unseen intents 93.9%.",
+  "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution for the Norwegian fine-tunes (catalog seeds are in training) — see the model cards for held-out numbers: 258 hand-written messages 95.0% (acv4) vs 94.2% (acv3); MASSIVE unseen intents 94.4%.",
   "gates": {
     "inscope": 94,
     "nearsyn_free": 94,
@@ -45,7 +45,7 @@
   "docs": {
     "MODEL_CARD_no-acv4.md": "Model card · no-acv4",
     "MODEL_CARD_no-acv3.md": "Model card · no-acv3",
-    "HELDOUT_COMPARISON_no-acv4.md": "Held-out comparison · all models",
+    "HELDOUT_COMPARISON_no-acv4.md": "Held-out comparison · all models incl. Qwen3 candidate (n=258 hand-written)",
     "AUDIT_REPORT_10K_no-acv4.md": "Audit report · no-acv4 (10k)",
     "AUDIT_REPORT_10K_no-acv3_v3b.md": "Audit report · no-acv3 (10k)",
     "AUDIT_REPORT_10K_en-acv3_reference.md": "Audit report · English acv3 (10k)",

@@ -52,18 +52,18 @@ Remove that `other` line and the same message returns `sporing` — the closest 
 
 no-acv4 adds contrastive hard-pair training, the same idea as the English acv3: 192 confusable intent pairs were mined from the training taxonomy and a local 35B model wrote 5,211 Norwegian messages that belong to one side and clearly not the other; a second pass by the same model as judge rejected 619 that leaked or were ambiguous, leaving 4,592. Pairs come from the training taxonomy only, never from the audit, so this is a transferable skill rather than benchmark fitting. Two smaller fixes ride along: truncated and near-duplicate descriptions inherited from the English corpus were cleaned out of the training rows, and 20% of examples show deliberately terse descriptions so brief real-world intent lists still route well.
 
-**Accuracy:** — held-out benchmarks first. No message in any set was used in training. The hand-written set is 139 Norwegian customer messages written after training, each offered with its nearest lookalike intent; MASSIVE is real human-written Norwegian, with 12 of its 60 intents held out of training entirely; the translated set covers intents the model has never seen. All models below see identical prompts.
+**Accuracy:** — held-out benchmarks first. No message in any set was used in training. The hand-written set is 258 Norwegian customer messages written after training, covering all 128 catalog intents, each offered with its nearest lookalike intent; MASSIVE is real human-written Norwegian, with 12 of its 60 intents held out of training entirely; the translated set covers intents the model has never seen. All models below see identical prompts.
 
 | Benchmark (held-out) | stock qwen2.5:1.5b | English acv3 | no-acv3 | this model |
 | --- | --- | --- | --- | --- |
-| Hand-written, near-synonym offered (n=139) | 74.8% | 89.2% | 95.0% | **97.8%** |
-| MASSIVE nb-NO, 12 unseen intents (n=412) | 68.4% | 89.6% | 93.7%* | **93.9%** |
-| MASSIVE nb-NO, seen intents, unseen messages (n=609) | 64.7% | 82.4% | **93.3%** | 93.1% |
-| Translated acv3, unseen intents (n=600) | 66.8% | 88.7% | **91.2%** | 90.8% |
+| Hand-written, near-synonym offered (n=258) | 77.9% | 91.9% | 94.2% | **95.0%** |
+| MASSIVE nb-NO, 12 unseen intents (n=412) | 67.5% | 87.9% | 93.9%* | **94.4%** |
+| MASSIVE nb-NO, seen intents, unseen messages (n=609) | 58.6% | 84.7% | 92.4% | **93.3%** |
+| Translated acv3, unseen intents (n=600) | 66.0% | 87.7% | **89.7%** | 89.0% |
 
 \* no-acv3 trained on these 12 intents; no-acv4 did not, and still matches it.
 
-On the hand-written set no-acv4 fixes four of no-acv3's seven misses and breaks none — all four are lookalike pairs (fraud report vs lost card, deductible vs quote, car insurance vs quote, food-delivery discount vs shop discount), exactly what the contrastive data targets. On MASSIVE and the translated set the two models tie: the remaining misses are shared and are mostly label noise in the source data (“syv hundre” labelled as a time-zone conversion), so those sets are at their ceiling.
+The gains are real but small: on the hand-written set no-acv4 fixes four of no-acv3's misses and breaks two, on unseen-intent native Norwegian it fixes seven and breaks five. The fixes are lookalike pairs (fraud report vs lost card, deductible vs quote, car insurance vs quote), exactly what the contrastive data targets. The remaining misses are largely shared between the two models and are mostly label noise in the source data (“syv hundre” labelled as a time-zone conversion), so these sets are close to their ceiling. A Qwen3-1.7B variant trained on the same data was evaluated and not released: it traded wins on the hand-written and translated sets for losses on unseen-intent native Norwegian — a wash, not an upgrade.
 
 **In-list obedience is 100.0% on every set** — it never produced a token outside the offered list, including the 926 audit calls where the gold intent was deliberately left out.
 
@@ -80,17 +80,17 @@ On the hand-written set no-acv4 fixes four of no-acv3's seven misses and breaks 
 
 | Metric | no-acv4 | no-acv3 | English acv3 | stock qwen2.5:1.5b |
 | --- | --- | --- | --- | --- |
-| Hand-written, near-synonym offered | **97.8%** | 95.0% | 89.2% | 74.8% |
-| Native Norwegian, unseen intents (MASSIVE) | **93.9%** | 93.7% | 89.6% | 68.4% |
-| Native Norwegian, held-out messages (MASSIVE) | 93.1% | **93.3%** | 82.4% | 64.7% |
-| Unseen intents (translated acv3) | 90.8% | **91.2%** | 88.7% | 66.8% |
+| Hand-written, near-synonym offered | **95.0%** | 94.2% | 91.9% | 77.9% |
+| Native Norwegian, unseen intents (MASSIVE) | **94.4%** | 93.9% | 87.9% | 67.5% |
+| Native Norwegian, held-out messages (MASSIVE) | **93.3%** | 92.4% | 84.7% | 58.6% |
+| Unseen intents (translated acv3) | 89.0% | **89.7%** | 87.7% | 66.0% |
 | Catalog audit, in-scope (in-distribution) | 99.6% | 99.5% | 94.3% | 84.2% |
 | Exact probes (free) | **100%** | **100%** | 91.7% | 97.2% |
-| In-list obedience | **100.0%** | **100.0%** | 99.9% | 96.4–99.2% |
+| In-list obedience | **100.0%** | **100.0%** | 99.9% | 96.6–99.7% |
 | Rejection rate (out-of-scope) | opt-in | opt-in | opt-in | 2.7% (accidental) |
 | Avg latency | ~0.51 s | ~0.51 s | ~0.51 s | ~0.36 s |
 
-no-acv4 is a strict upgrade over no-acv3: same never-refuse design, same perfect in-list obedience, and better discrimination on lookalike intents (+2.8 on the hand-written near-synonym test, with no regressions), while tying everywhere the data is at its ceiling. Use no-acv3 only if you need a bit-identical reproduction of earlier results.
+no-acv4 is a modest, consistent upgrade over no-acv3: same never-refuse design, same perfect in-list obedience, and better on three of the four held-out sets, most on native Norwegian. Honest caveat: the Norwegian models are within one to two points of each other on every honest set, and the shared misses are data noise — this recipe is at the ceiling of what the available Norwegian data can measure. Use no-acv3 only if you need a bit-identical reproduction of earlier results.
 
 **Every number here is reproducible.** All four models are scored on the same held-out sets and the same catalog audit — 10,008 calls each, 128 intents across 16 domains, same prompts and descriptions. Raw per-call results, computed metrics and a row-level diff: [audit dashboard](https://abyssal-audit.github.io/intent-audits/#norway)
 

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-21T02:14:57Z",
+  "generated": "2026-09-22T00:38:29Z",
   "countries": [
     {
       "scoring": "accept_bias",
@@ -13,7 +13,7 @@
       "name": "Norway",
       "language": "Norwegian (bokmål · nynorsk · dialect)",
       "flag": "🇳🇴",
-      "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution for no-acv3/no-acv4 (catalog seeds are in training) — see the model cards for held-out numbers: hand-written near-synonym set 97.8% (acv4) vs 95.0% (acv3), MASSIVE unseen intents 93.9%.",
+      "description": "128 intents / 16 domains, 940 messages (bokmål · nynorsk · dialect), temperature 0, free + enum decoding. In-distribution for the Norwegian fine-tunes (catalog seeds are in training) — see the model cards for held-out numbers: 258 hand-written messages 95.0% (acv4) vs 94.2% (acv3); MASSIVE unseen intents 94.4%.",
       "gates": {
         "inscope": 94,
         "nearsyn_free": 94,
@@ -218,8 +218,8 @@
         {
           "file": "audits/norway/HELDOUT_COMPARISON_no-acv4.md",
           "name": "HELDOUT_COMPARISON_no-acv4.md",
-          "bytes": 886,
-          "title": "Held-out comparison · all models"
+          "bytes": 893,
+          "title": "Held-out comparison · all models incl. Qwen3 candidate (n=258 hand-written)"
         },
         {
           "file": "audits/norway/MODEL_CARD_no-acv3.md",
@@ -230,7 +230,7 @@
         {
           "file": "audits/norway/MODEL_CARD_no-acv4.md",
           "name": "MODEL_CARD_no-acv4.md",
-          "bytes": 8615,
+          "bytes": 9124,
           "title": "Model card · no-acv4"
         }
       ]
